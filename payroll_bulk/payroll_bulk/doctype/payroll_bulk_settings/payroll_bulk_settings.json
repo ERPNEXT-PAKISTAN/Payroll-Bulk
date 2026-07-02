@@ -16,10 +16,8 @@
     "auto_hide_filters",
     "default_submit_slips",
     "section_break_components",
-    "enable_bonus",
-    "enable_allowance",
-    "enable_late_deduction",
-    "enable_other_deduction",
+    "auto_load_structure_components",
+    "component_rules",
     "section_break_source_defaults",
     "default_calculation_mode",
     "default_per_piece_basis",
@@ -95,35 +93,6 @@
       "label": "Default Submit Slips"
     },
     {
-      "fieldname": "section_break_components",
-      "fieldtype": "Section Break",
-      "label": "Quick Adjustment Fields"
-    },
-    {
-      "default": "1",
-      "fieldname": "enable_bonus",
-      "fieldtype": "Check",
-      "label": "Enable Bonus"
-    },
-    {
-      "default": "1",
-      "fieldname": "enable_allowance",
-      "fieldtype": "Check",
-      "label": "Enable Allowance"
-    },
-    {
-      "default": "1",
-      "fieldname": "enable_late_deduction",
-      "fieldtype": "Check",
-      "label": "Enable Late Deduction"
-    },
-    {
-      "default": "1",
-      "fieldname": "enable_other_deduction",
-      "fieldtype": "Check",
-      "label": "Enable Other Deduction"
-    },
-    {
       "fieldname": "section_break_source_defaults",
       "fieldtype": "Section Break",
       "label": "Default Source Mapping"
@@ -172,6 +141,23 @@
       "fieldname": "overtime_rate_field",
       "fieldtype": "Select",
       "label": "Rate per Piece Field"
+    },
+    {
+      "fieldname": "section_break_components",
+      "fieldtype": "Section Break",
+      "label": "Component Configuration"
+    },
+    {
+      "fieldname": "auto_load_structure_components",
+      "fieldtype": "Check",
+      "label": "Auto Load Components from Salary Structure",
+      "default": "1"
+    },
+    {
+      "fieldname": "component_rules",
+      "fieldtype": "Table",
+      "label": "Component Rules",
+      "options": "Payroll Bulk Component Setting"
     }
   ],
   "issingle": 1,

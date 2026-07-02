@@ -118,6 +118,11 @@ def _normalize_payroll_bulk_settings():
 	updates = {}
 	legacy_settings = not settings.get("default_calculation_mode")
 
+	if not settings.get("company"):
+		default_company = frappe.defaults.get_global_default("company") or frappe.defaults.get_user_default("Company")
+		if default_company:
+			updates["company"] = default_company
+
 	if legacy_settings:
 		updates["default_calculation_mode"] = "Manual"
 	elif settings.get("default_calculation_mode") == "Per Piece Qty":
@@ -132,6 +137,7 @@ def _normalize_payroll_bulk_settings():
 		"show_designation_filter",
 		"show_employee_filter",
 		"auto_hide_filters",
+		"auto_load_structure_components",
 	):
 		if legacy_settings or settings.get(fieldname) is None:
 			updates[fieldname] = 1

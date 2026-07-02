@@ -41,15 +41,15 @@ def _sync_salary_slip_links(doc: Document, event: str):
 
 
 def _update_batch_summary(batch_name: str):
-	rows = frappe.get_all("Bulk Salary Creation Employee", filters={"parent": batch_name}, fields=["status", "salary_slip_status", "gross_pay", "net_pay", "ot_amount", "bonus_amount", "other_allowance", "adv_deduct", "late_deduction", "other_deduction"], limit_page_length=1000)
+	rows = frappe.get_all("Bulk Salary Creation Employee", filters={"parent": batch_name}, fields=["status", "salary_slip_status", "gross_pay", "net_pay", "total_additions", "total_deductions"], limit_page_length=1000)
 	total_employees = len(rows)
 	processed_count = sum(1 for row in rows if row.status in TRACKED_PROCESSED)
 	success_count = sum(1 for row in rows if row.status in TRACKED_SUCCESS)
 	failed_count = sum(1 for row in rows if row.status == "Failed")
 	submitted_count = sum(1 for row in rows if row.salary_slip_status == "Submitted")
 	cancelled_count = sum(1 for row in rows if row.salary_slip_status == "Cancelled" or row.status == "Cancelled")
-	total_additions = sum((row.ot_amount or 0) + (row.bonus_amount or 0) + (row.other_allowance or 0) for row in rows)
-	total_deductions = sum((row.adv_deduct or 0) + (row.late_deduction or 0) + (row.other_deduction or 0) for row in rows)
+	total_additions = sum(row.total_additions or 0 for row in rows)
+	total_deductions = sum(row.total_deductions or 0 for row in rows)
 	total_gross = sum(row.gross_pay or 0 for row in rows)
 	total_net = sum(row.net_pay or 0 for row in rows)
 	if not total_employees:

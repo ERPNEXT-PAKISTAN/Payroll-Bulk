@@ -51,6 +51,8 @@ function bs_default_settings() {
   return {
     default_calculation_mode: "Manual",
     default_per_piece_basis: "Total Hours",
+    auto_load_structure_components: 1,
+    component_rules: [],
     overtime_doctype: "",
     overtime_employee_field: "",
     overtime_date_field: "",
@@ -62,10 +64,6 @@ function bs_default_settings() {
     show_designation_filter: 1,
     show_employee_filter: 1,
     auto_hide_filters: 1,
-    enable_bonus: 1,
-    enable_allowance: 1,
-    enable_late_deduction: 1,
-    enable_other_deduction: 1,
     enable_filter_fetch: 1,
     enable_manual_add: 1,
     enable_component_configuration: 1,
@@ -92,6 +90,32 @@ function bs_get_mode_attendance_source(mode) {
 
 function bs_is_piece_mode(mode) {
   return mode === "Per Piece or Per Hour";
+}
+
+function bs_get_active_company() {
+  const selected = window._bs.ctrls?.company_ctrl?.get_value?.();
+  return selected || window._bs.frm?.doc?.company || window._bs.settings?.company || frappe.defaults.get_default("company") || "";
+}
+
+function bs_get_component_rules() {
+  return (window._bs.settings?.component_rules || []).filter((row) => row && row.salary_component);
+}
+
+function bs_get_saved_components_map(frm) {
+  const grouped = {};
+  (frm.doc.component_entries || []).forEach((entry) => {
+    const key = entry.employee_row || entry.employee;
+    if (!key) return;
+    grouped[key] = grouped[key] || [];
+    grouped[key].push({
+      employee_row: entry.employee_row || "",
+      employee: entry.employee || "",
+      salary_component: entry.salary_component || "",
+      component_type: entry.component_type || "Earning",
+      amount: parseFloat(entry.amount || 0),
+    });
+  });
+  return grouped;
 }
 
 function bs_apply_month_period(frm, month_name) {
@@ -127,6 +151,7 @@ async function bs_get_settings() {
 }
 
 function bs_apply_source_defaults(frm, settings) {
+  frm.doc.company = frm.doc.company || settings.company || frappe.defaults.get_default("company") || "";
   frm.doc.calculation_mode = frm.doc.calculation_mode || settings.default_calculation_mode || "Manual";
   frm.doc.attendance_source = bs_get_mode_attendance_source(frm.doc.calculation_mode);
   frm.doc.overtime_source = frm.doc.overtime_source || "Manual";
@@ -439,9 +464,10 @@ function render_main_ui(frm) {
   const settings = window._bs.settings || bs_default_settings();
   settings.enable_component_configuration = 0;
   bs_apply_source_defaults(frm, settings);
+  const saved_components_map = bs_get_saved_components_map(frm);
   const show_fetch_filters = !!(settings.enable_filter_fetch && (bs_to_int(settings.show_department_filter, 1) || bs_to_int(settings.show_branch_filter, 1) || bs_to_int(settings.show_designation_filter, 1)));
   const show_manual_employee = !!(settings.enable_manual_add && bs_to_int(settings.show_employee_filter, 1));
-  const show_filter_row = show_fetch_filters || show_manual_employee;
+  const show_filter_row = true;
 
   // Restore from saved draft
   if (frm.doc.employees && frm.doc.employees.length) {
@@ -492,6 +518,13 @@ function render_main_ui(frm) {
         payment_entry:  r.payment_entry || "",
         slip_cancelled_on: r.slip_cancelled_on || "",
         error_message:  r.error_message || "",
+        components: (saved_components_map[r.name] || saved_components_map[r.employee] || []).map((item) => ({
+          key: item.salary_component,
+          component: item.salary_component,
+          label: item.salary_component,
+          type: item.component_type || "Earning",
+          amount: parseFloat(item.amount || 0),
+        })),
       });
       recalc_row(window._bs.rows[window._bs.rows.length - 1]);
     });
@@ -541,6 +574,9 @@ function render_main_ui(frm) {
         <div class="bs-filter-panel-title">Filters & Source</div>
         ${show_filter_row ? `
         <div class="bs-qa-row">
+          <div class="bs-field-wrap bs-floating-field" style="flex:1;min-width:170px">
+            <span class="bs-field-caption">Company</span><div id="bs-company-wrap"></div>
+          </div>
           ${bs_to_int(settings.show_department_filter, 1) ? `
           <div class="bs-field-wrap bs-floating-field" style="flex:1;min-width:150px">
             <span class="bs-field-caption">Department</span><div id="bs-dept-wrap"></div>
@@ -662,7 +698,7 @@ function render_main_ui(frm) {
       </div>
 
       <div class="bs-footer-row">
-        <span class="bs-footer-hint">Enter overtime, bonus, allowance, and deductions per employee.</span>
+        <span class="bs-footer-hint">Enter overtime and component amounts per employee.</span>
         <span id="bs-total-display" class="bs-total-badge" style="display:none"></span>
       </div>
 
@@ -720,44 +756,41 @@ function render_main_ui(frm) {
     return ctrl;
   };
 
+  const company_ctrl = make_link("#bs-company-wrap", "bs_company", "Company", "Company");
   const dept_ctrl   = settings.enable_filter_fetch && bs_to_int(settings.show_department_filter, 1) ? make_link("#bs-dept-wrap",   "bs_dept",   "Department",  "Department") : null;
   const branch_ctrl = settings.enable_filter_fetch && bs_to_int(settings.show_branch_filter, 1) ? make_link("#bs-branch-wrap",  "bs_branch", "Branch",      "Branch") : null;
   const desig_ctrl  = settings.enable_filter_fetch && bs_to_int(settings.show_designation_filter, 1) ? make_link("#bs-desig-wrap",   "bs_desig",  "Designation", "Designation") : null;
   const emp_ctrl    = settings.enable_manual_add && bs_to_int(settings.show_employee_filter, 1) ? make_link("#bs-emp-link-wrap", "bs_emp",    "Employee",    "Employee") : null;
-  const overtime_component_ctrl  = settings.enable_component_configuration ? make_link("#bs-ot-component-wrap", "bs_overtime_component", "Salary Component", "Auto: Bulk Overtime") : null;
-  const bonus_component_ctrl     = settings.enable_component_configuration ? make_link("#bs-bonus-component-wrap", "bs_bonus_component", "Salary Component", "Auto: Bulk Bonus") : null;
-  const allowance_component_ctrl = settings.enable_component_configuration ? make_link("#bs-allowance-component-wrap", "bs_allowance_component", "Salary Component", "Auto: Bulk Allowance") : null;
-  const late_component_ctrl      = settings.enable_component_configuration ? make_link("#bs-late-component-wrap", "bs_late_component", "Salary Component", "Auto: Late Deduction") : null;
-  const deduction_component_ctrl = settings.enable_component_configuration ? make_link("#bs-deduction-component-wrap", "bs_deduction_component", "Salary Component", "Auto: Other Deduction") : null;
-
-  overtime_component_ctrl && overtime_component_ctrl.set_value(frm.doc.overtime_component || "");
-  bonus_component_ctrl && bonus_component_ctrl.set_value(frm.doc.bonus_component || "");
-  allowance_component_ctrl && allowance_component_ctrl.set_value(frm.doc.allowance_component || "");
-  late_component_ctrl && late_component_ctrl.set_value(frm.doc.late_deduction_component || "");
-  deduction_component_ctrl && deduction_component_ctrl.set_value(frm.doc.deduction_component || "");
+  company_ctrl && company_ctrl.set_value(frm.doc.company || settings.company || frappe.defaults.get_default("company") || "");
 
   window._bs.ctrls = {
-    dept_ctrl, branch_ctrl, desig_ctrl, emp_ctrl,
-    overtime_component_ctrl, bonus_component_ctrl, allowance_component_ctrl,
-    late_component_ctrl, deduction_component_ctrl,
+    company_ctrl, dept_ctrl, branch_ctrl, desig_ctrl, emp_ctrl,
   };
   window._bs._sel  = { emp: "", name: "", dept: "", desig: "" };
 
   if (emp_ctrl) {
-    emp_ctrl.get_query = () => ({ filters: { status: "Active" } });
+    emp_ctrl.get_query = () => {
+      const filters = { status: "Active" };
+      const company = bs_get_active_company();
+      if (company) filters.company = company;
+      return { filters };
+    };
   }
 
-  const bind_component_value = (ctrl, fieldname) => {
-    if (!ctrl) return;
-    const sync = () => { frm.doc[fieldname] = ctrl.get_value() || ""; };
-    ctrl.$input.on("change blur awesomplete-selectcomplete", sync);
-    sync();
-  };
-  bind_component_value(overtime_component_ctrl, "overtime_component");
-  bind_component_value(bonus_component_ctrl, "bonus_component");
-  bind_component_value(allowance_component_ctrl, "allowance_component");
-  bind_component_value(late_component_ctrl, "late_deduction_component");
-  bind_component_value(deduction_component_ctrl, "deduction_component");
+  company_ctrl && company_ctrl.$input.on("change blur awesomplete-selectcomplete", async () => {
+    const company = company_ctrl.get_value() || settings.company || frappe.defaults.get_default("company") || "";
+    await bs_set_doc_values(frm, { company });
+    window._bs._sel = { emp: "", name: "", dept: "", desig: "", ctc: 0 };
+    if (emp_ctrl) {
+      emp_ctrl.set_value("");
+      emp_ctrl.$input.val("");
+    }
+    if (window._bs.rows.length) {
+      await bs_refresh_structure_assignments(window._bs.rows);
+      window._bs.rows.forEach(recalc_row);
+      bs_render_table();
+    }
+  });
 
   emp_ctrl && emp_ctrl.$input.on("awesomplete-selectcomplete", function () {
     const v = emp_ctrl.$input.val().trim();
@@ -765,13 +798,14 @@ function render_main_ui(frm) {
     frappe.call({
       method: "frappe.client.get_value",
       args: { doctype: "Employee", filters: { name: v },
-              fieldname: ["employee_name","department","designation","ctc"] },
+              fieldname: ["employee_name","department","designation","ctc","company"] },
       callback(r) {
         if (r.message) {
           window._bs._sel.name  = r.message.employee_name || v;
           window._bs._sel.dept  = r.message.department    || "";
           window._bs._sel.desig = r.message.designation   || "";
           window._bs._sel.ctc   = parseFloat(r.message.ctc || 0);
+          window._bs._sel.company = r.message.company || "";
         }
       },
     });
@@ -856,6 +890,8 @@ function bs_fetch_employees() {
   notice("⏳ Fetching…");
 
   const filters = [["status","=","Active"]];
+  const company = bs_get_active_company();
+  if (company) filters.push(["company", "=", company]);
   if (dept)   filters.push(["department",  "=", dept]);
   if (branch) filters.push(["branch",      "=", branch]);
   if (desig)  filters.push(["designation", "=", desig]);
@@ -900,6 +936,11 @@ function bs_quick_add() {
   }
 
   const do_add = async (name, dept, desig, ctc) => {
+    const active_company = bs_get_active_company();
+    if (window._bs._sel.company && active_company && window._bs._sel.company !== active_company) {
+      notice(`⚠ ${emp_id} belongs to ${window._bs._sel.company}, not ${active_company}.`);
+      return;
+    }
     const row = make_row(emp_id, name, dept, desig, parseFloat(ctc||0));
     window._bs.rows.push(row);
     bs_normalize_rows();
@@ -921,6 +962,11 @@ function bs_quick_add() {
               fieldname:["employee_name","department","designation","ctc"] },
       async callback(r) {
         const m = r.message || {};
+        const active_company = bs_get_active_company();
+        if (active_company && m.company && m.company !== active_company) {
+          notice(`⚠ ${emp_id} belongs to ${m.company}, not ${active_company}.`);
+          return;
+        }
         await do_add(m.employee_name||emp_id, m.department, m.designation, m.ctc);
       },
       async error() { await do_add(emp_id); },
@@ -941,6 +987,7 @@ function make_row(employee, employee_name, department, designation, ctc) {
     bonus_amount:0, other_allowance:0,
     gross: ctc, advances:[], adv_fetched:false, source_row_names: [],
     adv_deduct:0, late_deduction:0, other_deduction:0,
+    components: [],
     total_additions:0, total_deductions:0, net: ctc,
     status:"Pending", salary_slip_status:"", payment_status:"Not Paid",
     salary_structure:"", salary_structure_assignment:"",
@@ -949,6 +996,91 @@ function make_row(employee, employee_name, department, designation, ctc) {
     salary_slip:"", payment_entry:"", slip_cancelled_on:"",
     error_message:"",
   };
+}
+
+function bs_get_component_totals(row) {
+  const items = row.components || [];
+  const earnings = items
+    .filter((item) => item.type === "Earning")
+    .reduce((sum, item) => sum + (parseFloat(item.amount || 0) || 0), 0);
+  const deductions = items
+    .filter((item) => item.type === "Deduction")
+    .reduce((sum, item) => sum + (parseFloat(item.amount || 0) || 0), 0);
+  return { earnings, deductions };
+}
+
+function bs_is_excluded_structure_component(component_name = "", component_type = "") {
+  const value = String(component_name || "").toLowerCase();
+  if (!value) return true;
+  if (component_type === "Earning" && /(basic|base salary|bs salary|ctc|gross|overtime|\bot\b)/.test(value)) return true;
+  if (component_type === "Deduction" && /(advance)/.test(value)) return true;
+  return false;
+}
+
+async function bs_get_salary_structure_doc(structure_name) {
+  if (!structure_name) return null;
+  window._bs.structure_doc_cache = window._bs.structure_doc_cache || {};
+  if (window._bs.structure_doc_cache[structure_name]) return window._bs.structure_doc_cache[structure_name];
+  const res = await bs_call("frappe.client.get", { doctype: "Salary Structure", name: structure_name });
+  window._bs.structure_doc_cache[structure_name] = res.message || null;
+  return window._bs.structure_doc_cache[structure_name];
+}
+
+function bs_component_rule_map() {
+  const rules = bs_get_component_rules();
+  const has_rules = rules.length > 0;
+  const map = {};
+  rules.forEach((row) => {
+    map[row.salary_component] = {
+      enabled: bs_to_int(row.enabled, 1) === 1,
+      type: row.component_type || "",
+    };
+  });
+  return { has_rules, map };
+}
+
+function bs_build_row_components(row, structure_doc) {
+  const existing = {};
+  (row.components || []).forEach((item) => {
+    if (!item?.component) return;
+    existing[`${item.type}::${item.component}`] = parseFloat(item.amount || 0) || 0;
+  });
+
+  const { has_rules, map: rule_map } = bs_component_rule_map();
+  const items = [];
+  const push_items = (component_rows, type) => {
+    (component_rows || []).forEach((item) => {
+      const component = item.salary_component;
+      if (!component || bs_is_excluded_structure_component(component, type)) return;
+      const rule = rule_map[component];
+      if (has_rules && (!rule || !rule.enabled)) return;
+      items.push({
+        key: `${type}::${component}`,
+        component,
+        label: component,
+        type: rule?.type || type,
+        amount: existing[`${type}::${component}`] || 0,
+      });
+    });
+  };
+  push_items(structure_doc?.earnings, "Earning");
+  push_items(structure_doc?.deductions, "Deduction");
+  if (!Object.keys(existing).length) {
+    const legacy_map = [
+      { amount: parseFloat(row.other_allowance || 0), type: "Earning", keywords: ["allowance"] },
+      { amount: parseFloat(row.bonus_amount || 0), type: "Earning", keywords: ["bonus"] },
+      { amount: parseFloat(row.late_deduction || 0), type: "Deduction", keywords: ["late", "absent"] },
+      { amount: parseFloat(row.other_deduction || 0), type: "Deduction", keywords: ["other"] },
+    ];
+    legacy_map.forEach((legacy) => {
+      if (!legacy.amount) return;
+      const target = items.find((item) =>
+        item.type === legacy.type && legacy.keywords.some((keyword) => item.component.toLowerCase().includes(keyword))
+      );
+      if (target) target.amount = legacy.amount;
+    });
+  }
+  row.components = items;
 }
 
 // ─── 6. RENDER TABLE ──────────────────────────────────────────────────────────
@@ -1031,46 +1163,20 @@ function bs_render_table() {
            Fetch Advances
          </button>`;
 
-    const adjustment_inputs = [];
-    if (settings.enable_bonus) {
-      adjustment_inputs.push(`
-        <label class="bs-adjust-item">
-          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
-            placeholder="Bonus" value="${bs_input_value(r.bonus_amount)}" onfocus="this.select()"
-            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'bonus_amount',this.value)"/>
-        </label>`);
-    }
-    if (settings.enable_allowance) {
-      adjustment_inputs.push(`
-        <label class="bs-adjust-item">
-          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
-            placeholder="Allowance" value="${bs_input_value(r.other_allowance)}" onfocus="this.select()"
-            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'other_allowance',this.value)"/>
-        </label>`);
-    }
-    if (settings.enable_late_deduction) {
-      adjustment_inputs.push(`
-        <label class="bs-adjust-item">
-          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
-            placeholder="Late Ded." value="${bs_input_value(r.late_deduction)}" onfocus="this.select()"
-            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'late_deduction',this.value)"/>
-        </label>`);
-    }
-    if (settings.enable_other_deduction) {
-      adjustment_inputs.push(`
-        <label class="bs-adjust-item">
-          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
-            placeholder="Other Ded." value="${bs_input_value(r.other_deduction)}" onfocus="this.select()"
-            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'other_deduction',this.value)"/>
-        </label>`);
-    }
-    const adjustments_html = adjustment_inputs.length
-      ? `<div class="bs-adjust-grid bs-adjust-grid-row">${adjustment_inputs.join("")}</div>`
-      : `<div class="bs-source-inline bs-source-inline-adjust"><span>No earnings / deductions</span></div>`;
-    const adjustments_cell_html = adjustment_inputs.length
+    const component_totals = bs_get_component_totals(r);
+    const component_inputs = (r.components || []).map((item) => `
+      <label class="bs-adjust-item">
+        <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
+          placeholder="${frappe.utils.escape_html(item.label)}" value="${bs_input_value(item.amount)}" onfocus="this.select()"
+          onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_component_amount(${r._id},'${encodeURIComponent(item.key)}',this.value)"/>
+      </label>`).join("");
+    const adjustments_html = component_inputs
+      ? `<div class="bs-adjust-grid bs-adjust-grid-row">${component_inputs}</div>`
+      : `<div class="bs-source-inline bs-source-inline-adjust"><span>No structure components configured</span></div>`;
+    const adjustments_cell_html = component_inputs
       ? `<div class="bs-adjust-summary">
-          <span class="bs-adjust-summary-chip">Add ${fmt_num((r.bonus_amount || 0) + (r.other_allowance || 0))}</span>
-          <span class="bs-adjust-summary-chip">Ded ${fmt_num((r.late_deduction || 0) + (r.other_deduction || 0))}</span>
+          <span class="bs-adjust-summary-chip">Earn ${fmt_num(component_totals.earnings)}</span>
+          <span class="bs-adjust-summary-chip">Ded ${fmt_num(component_totals.deductions)}</span>
         </div>`
       : `<div class="bs-adjust-summary bs-adjust-summary-empty">—</div>`;
 
@@ -1275,6 +1381,17 @@ window.bs_update_amount = (id, fieldname, val) => {
   bs_render_table();
 };
 
+window.bs_update_component_amount = (id, encoded_key, val) => {
+  const row = window._bs.rows.find((r) => r._id === id);
+  if (!row) return;
+  const key = decodeURIComponent(encoded_key || "");
+  const item = (row.components || []).find((component) => component.key === key);
+  if (!item) return;
+  item.amount = Math.max(0, parseFloat(val) || 0);
+  recalc_row(row);
+  bs_render_table();
+};
+
 window.bs_update_adv_deduct = (row_id, adv_idx, val) => {
   const row = window._bs.rows.find((r) => r._id === row_id);
   if (!row || !row.advances[adv_idx]) return;
@@ -1461,12 +1578,9 @@ function recalc_row(row) {
     }
   }
 
-  const bonus_amount = settings.enable_bonus ? (row.bonus_amount || 0) : 0;
-  const allowance_amount = settings.enable_allowance ? (row.other_allowance || 0) : 0;
-  const late_deduction = settings.enable_late_deduction ? (row.late_deduction || 0) : 0;
-  const other_deduction = settings.enable_other_deduction ? (row.other_deduction || 0) : 0;
-  row.total_additions = row.ot_amount + bonus_amount + allowance_amount;
-  row.total_deductions = (row.adv_deduct || 0) + late_deduction + other_deduction;
+  const component_totals = bs_get_component_totals(row);
+  row.total_additions = row.ot_amount + component_totals.earnings;
+  row.total_deductions = (row.adv_deduct || 0) + component_totals.deductions;
   row.gross = row.base_pay + row.total_additions;
   row.net = Math.max(0, row.gross - row.total_deductions);
 }
@@ -1649,14 +1763,11 @@ async function bs_save_draft() {
 function bs_sync_to_frm(frm) {
   bs_normalize_rows();
   if (window._bs.ctrls) {
-    frm.doc.overtime_component = window._bs.ctrls.overtime_component_ctrl?.get_value() || frm.doc.overtime_component || "";
-    frm.doc.bonus_component = window._bs.ctrls.bonus_component_ctrl?.get_value() || frm.doc.bonus_component || "";
-    frm.doc.allowance_component = window._bs.ctrls.allowance_component_ctrl?.get_value() || frm.doc.allowance_component || "";
-    frm.doc.late_deduction_component = window._bs.ctrls.late_component_ctrl?.get_value() || frm.doc.late_deduction_component || "";
-    frm.doc.deduction_component = window._bs.ctrls.deduction_component_ctrl?.get_value() || frm.doc.deduction_component || "";
+    frm.doc.company = window._bs.ctrls.company_ctrl?.get_value() || frm.doc.company || window._bs.settings?.company || frappe.defaults.get_default("company") || "";
   }
   bs_sync_source_doc(frm);
   frm.doc.employees = [];
+  frm.doc.component_entries = [];
   window._bs.rows.forEach((row) => {
     if (!row.employee) return;
     const c = frappe.model.add_child(frm.doc, "Bulk Salary Creation Employee", "employees");
@@ -1699,6 +1810,17 @@ function bs_sync_to_frm(frm) {
     c.error_message   = row.error_message || "";
     if (row.salary_slip) c.salary_slip = row.salary_slip;
     if (row.payment_entry) c.payment_entry = row.payment_entry;
+
+    (row.components || [])
+      .filter((item) => item.component && parseFloat(item.amount || 0) > 0)
+      .forEach((item) => {
+        const component_row = frappe.model.add_child(frm.doc, "Bulk Salary Component Entry", "component_entries");
+        component_row.employee_row = c.name || row.row_name || "";
+        component_row.employee = row.employee;
+        component_row.salary_component = item.component;
+        component_row.component_type = item.type || "Earning";
+        component_row.amount = parseFloat(item.amount || 0) || 0;
+      });
   });
   bs_update_parent_summary(frm);
   frm.refresh_field("employees");
@@ -1967,6 +2089,7 @@ async function bs_refresh_structure_assignments(rows = window._bs.rows || []) {
   await Promise.all(targets.map(async (row) => {
     try {
       const structure_info = await bs_get_salary_structure(row.employee, on_date);
+      const structure_doc = await bs_get_salary_structure_doc(structure_info.salary_structure);
       row.salary_structure = structure_info.salary_structure || row.salary_structure || "";
       row.salary_structure_assignment = structure_info.name || row.salary_structure_assignment || "";
       row.payroll_payable_account = structure_info.payroll_payable_account || "";
@@ -1974,12 +2097,16 @@ async function bs_refresh_structure_assignments(rows = window._bs.rows || []) {
       row.structure_warning = row.payroll_payable_account
         ? ""
         : `Payroll Payable Account missing on ${row.salary_structure_assignment || "Salary Structure Assignment"}`;
+      if (bs_to_int(window._bs.settings?.auto_load_structure_components, 1)) {
+        bs_build_row_components(row, structure_doc);
+      }
     } catch (error) {
       row.salary_structure = "";
       row.salary_structure_assignment = "";
       row.payroll_payable_account = "";
       row.structure_base = 0;
       row.structure_warning = error.message || "Salary Structure Assignment not found";
+      row.components = row.components || [];
     }
   }));
 }
@@ -2068,7 +2195,6 @@ async function bs_make_additional_salary({ employee, company, component, type, a
 }
 
 async function bs_prepare_salary_inputs(row, vals, batch_name) {
-  const settings = window._bs.settings || bs_default_settings();
   await bs_delete_generated_additional_salaries(row.employee, vals.posting_date, batch_name);
 
   if (row.ot_amount > 0) {
@@ -2079,38 +2205,6 @@ async function bs_prepare_salary_inputs(row, vals, batch_name) {
       component: overtime_component,
       type: "Earning",
       amount: row.ot_amount,
-      payroll_date: vals.posting_date,
-      start_date: vals.start_date,
-      end_date: vals.end_date,
-      ref_doctype: "Bulk Salary Creation",
-      ref_docname: batch_name,
-    });
-  }
-
-  if (settings.enable_bonus && (row.bonus_amount || 0) > 0) {
-    const bonus_component = vals.bonus_component || await bs_ensure_salary_component("Bulk Bonus", "Earning");
-    await bs_make_additional_salary({
-      employee: row.employee,
-      company: vals.company,
-      component: bonus_component,
-      type: "Earning",
-      amount: row.bonus_amount,
-      payroll_date: vals.posting_date,
-      start_date: vals.start_date,
-      end_date: vals.end_date,
-      ref_doctype: "Bulk Salary Creation",
-      ref_docname: batch_name,
-    });
-  }
-
-  if (settings.enable_allowance && (row.other_allowance || 0) > 0) {
-    const allowance_component = vals.allowance_component || await bs_ensure_salary_component("Bulk Allowance", "Earning");
-    await bs_make_additional_salary({
-      employee: row.employee,
-      company: vals.company,
-      component: allowance_component,
-      type: "Earning",
-      amount: row.other_allowance,
       payroll_date: vals.posting_date,
       start_date: vals.start_date,
       end_date: vals.end_date,
@@ -2138,30 +2232,15 @@ async function bs_prepare_salary_inputs(row, vals, batch_name) {
     });
   }
 
-  if (settings.enable_late_deduction && (row.late_deduction || 0) > 0) {
-    const late_component = vals.late_deduction_component || await bs_ensure_salary_component("Late Deduction", "Deduction");
+  for (const item of (row.components || [])) {
+    const amount = parseFloat(item.amount || 0);
+    if (!item.component || amount <= 0) continue;
     await bs_make_additional_salary({
       employee: row.employee,
       company: vals.company,
-      component: late_component,
-      type: "Deduction",
-      amount: row.late_deduction,
-      payroll_date: vals.posting_date,
-      start_date: vals.start_date,
-      end_date: vals.end_date,
-      ref_doctype: "Bulk Salary Creation",
-      ref_docname: batch_name,
-    });
-  }
-
-  if (settings.enable_other_deduction && (row.other_deduction || 0) > 0) {
-    const other_deduction_component = vals.deduction_component || await bs_ensure_salary_component("Other Deduction", "Deduction");
-    await bs_make_additional_salary({
-      employee: row.employee,
-      company: vals.company,
-      component: other_deduction_component,
-      type: "Deduction",
-      amount: row.other_deduction,
+      component: item.component,
+      type: item.type || "Earning",
+      amount,
       payroll_date: vals.posting_date,
       start_date: vals.start_date,
       end_date: vals.end_date,
@@ -3264,7 +3343,7 @@ function inject_bs_styles() {
     .bs-row-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
     .bs-row-actions-compact{margin-top:4px}
     .bs-adjust-grid{display:grid;grid-template-columns:repeat(2,minmax(74px,1fr));gap:4px 8px}
-    .bs-adjust-grid-row{grid-template-columns:repeat(4,minmax(86px,1fr));gap:2px 6px;align-items:end}
+    .bs-adjust-grid-row{grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:2px 6px;align-items:end}
     .bs-adjust-grid label{display:flex;flex-direction:column;gap:2px;font-size:9.5px;color:#475569;font-weight:700;line-height:1}
     .bs-adjust-grid label span{display:block}
     .bs-adjust-item{display:block}

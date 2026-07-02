@@ -3314,6 +3314,14 @@
       "read_only": 1,
       "allow_on_submit": 1,
       "hidden": 0
+    },
+    {
+      "fieldname": "component_entries",
+      "fieldtype": "Table",
+      "label": "Component Entries",
+      "options": "Bulk Salary Component Entry",
+      "hidden": 1,
+      "allow_on_submit": 1
     }
   ],
   "force_re_route_to_default_view": 0,
@@ -3415,6 +3423,7 @@
     "bulk_payment_entry",
     "section_break_mdan",
     "employees",
+    "component_entries",
     "section_break_kdpg",
     "total_employees",
     "column_break_ozij",

@@ -1,6 +1,26 @@
 frappe.ui.form.on("Payroll Bulk Settings", {
   refresh(frm) {
     pb_refresh_source_fields(frm);
+    pb_bind_component_rule_query(frm);
+    if (!frm.is_new()) {
+      frm.add_custom_button(__("Load Components from Structures"), async () => {
+        const company = frm.doc.company || frappe.defaults.get_default("company");
+        frappe.dom.freeze(__("Loading components from salary structures..."));
+        try {
+          await frappe.call({
+            method: "payroll_bulk.api.sync_payroll_bulk_component_rules",
+            args: { company },
+          });
+          await frm.reload_doc();
+          frappe.show_alert({
+            message: __("Component rules loaded from salary structures"),
+            indicator: "green",
+          }, 4);
+        } finally {
+          frappe.dom.unfreeze();
+        }
+      });
+    }
   },
 
   overtime_doctype(frm) {
@@ -31,6 +51,18 @@ frappe.ui.form.on("Payroll Bulk Settings", {
     }
   },
 });
+
+function pb_bind_component_rule_query(frm) {
+  const grid = frm.get_field("component_rules")?.grid;
+  if (!grid) return;
+  grid.get_field("salary_component").get_query = function () {
+    return {
+      filters: {
+        disabled: 0,
+      },
+    };
+  };
+}
 
 async function pb_refresh_source_fields(frm) {
   const doctype_name = frm.doc.overtime_doctype;

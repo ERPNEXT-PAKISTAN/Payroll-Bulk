@@ -50,6 +50,91 @@ def get_doctype_field_options(doctype_name: str):
 	]
 
 
+def _is_excluded_structure_component(component_name: str | None, component_type: str | None) -> bool:
+	value = (component_name or "").strip().lower()
+	component_type = (component_type or "").strip()
+	if not value:
+		return True
+	if component_type == "Earning" and any(
+		token in value for token in ("basic", "base salary", "bs salary", "ctc", "gross")
+	):
+		return True
+	if component_type == "Earning" and ("overtime" in value or value == "ot"):
+		return True
+	if component_type == "Deduction" and "advance" in value:
+		return True
+	return False
+
+
+def _get_structure_names_for_company(company: str | None = None) -> list[str]:
+	structure_names = frappe.get_all(
+		"Salary Structure Assignment",
+		filters={"docstatus": 1, **({"company": company} if company else {})},
+		pluck="salary_structure",
+		distinct=True,
+		limit_page_length=1000,
+	)
+	structure_names = [name for name in structure_names if name]
+	if structure_names:
+		return structure_names
+
+	meta = frappe.get_meta("Salary Structure")
+	if company and meta.get_field("company"):
+		structure_names = frappe.get_all(
+			"Salary Structure",
+			filters={"company": company, "docstatus": ["!=", 2]},
+			pluck="name",
+			limit_page_length=1000,
+		)
+		structure_names = [name for name in structure_names if name]
+		if structure_names:
+			return structure_names
+
+	return frappe.get_all(
+		"Salary Structure",
+		filters={"docstatus": ["!=", 2]},
+		pluck="name",
+		limit_page_length=1000,
+	)
+
+
+def _get_component_rules_from_structures(company: str | None = None) -> list[dict]:
+	component_map: dict[tuple[str, str], dict] = {}
+	for structure_name in _get_structure_names_for_company(company):
+		structure = frappe.get_cached_doc("Salary Structure", structure_name)
+		for fieldname, component_type in (("earnings", "Earning"), ("deductions", "Deduction")):
+			for row in structure.get(fieldname) or []:
+				component = row.salary_component
+				if _is_excluded_structure_component(component, component_type):
+					continue
+				key = (component_type, component)
+				component_map.setdefault(
+					key,
+					{
+						"salary_component": component,
+						"component_type": component_type,
+						"enabled": 1,
+					},
+				)
+
+	return [
+		component_map[key]
+		for key in sorted(component_map, key=lambda item: (item[0], item[1]))
+	]
+
+
+@frappe.whitelist()
+def sync_payroll_bulk_component_rules(company: str | None = None):
+	settings = frappe.get_single("Payroll Bulk Settings")
+	company = company or settings.company or frappe.defaults.get_user_default("Company")
+	rules = _get_component_rules_from_structures(company)
+	settings.set("component_rules", [])
+	for rule in rules:
+		settings.append("component_rules", rule)
+	settings.save(ignore_permissions=True)
+	return {"count": len(rules), "company": company, "rules": rules}
+
+
 @frappe.whitelist()
 def get_bulk_source_values(
 	employees: list[str] | str,
@@ -900,6 +985,20 @@ def _create_base_additional_salary_if_needed(row, assignment, company, start_dat
 	)
 
 
+def _get_batch_component_entries(batch_name: str, row_name: str, employee: str):
+	filters = {"parent": batch_name}
+	if row_name:
+		filters["employee_row"] = row_name
+	else:
+		filters["employee"] = employee
+	return frappe.get_all(
+		"Bulk Salary Component Entry",
+		filters=filters,
+		fields=["salary_component", "component_type", "amount"],
+		limit_page_length=200,
+	)
+
+
 @frappe.whitelist()
 def sync_bulk_row_additional_salaries(
 	batch_name: str,
@@ -934,28 +1033,6 @@ def sync_bulk_row_additional_salaries(
 	_upsert_additional_salary(
 		row,
 		company,
-		_guess_component(structure_doc, "earnings", ("allowance",)),
-		"Earning",
-		row.other_allowance,
-		start_date,
-		end_date,
-		posting_date,
-		batch_name,
-	)
-	_upsert_additional_salary(
-		row,
-		company,
-		_guess_component(structure_doc, "earnings", ("bonus",)),
-		"Earning",
-		row.bonus_amount,
-		start_date,
-		end_date,
-		posting_date,
-		batch_name,
-	)
-	_upsert_additional_salary(
-		row,
-		company,
 		_guess_component(structure_doc, "deductions", ("advance",)),
 		"Deduction",
 		row.adv_deduct,
@@ -964,28 +1041,18 @@ def sync_bulk_row_additional_salaries(
 		posting_date,
 		batch_name,
 	)
-	_upsert_additional_salary(
-		row,
-		company,
-		_guess_component(structure_doc, "deductions", ("late", "absent", "lwp")),
-		"Deduction",
-		row.late_deduction,
-		start_date,
-		end_date,
-		posting_date,
-		batch_name,
-	)
-	_upsert_additional_salary(
-		row,
-		company,
-		_guess_component(structure_doc, "deductions", ("other",)),
-		"Deduction",
-		row.other_deduction,
-		start_date,
-		end_date,
-		posting_date,
-		batch_name,
-	)
+	for component_row in _get_batch_component_entries(batch_name, row_name, row.employee):
+		_upsert_additional_salary(
+			row,
+			company,
+			component_row.salary_component,
+			component_row.component_type or "Earning",
+			component_row.amount,
+			start_date,
+			end_date,
+			posting_date,
+			batch_name,
+		)
 	return {
 		"row_name": row_name,
 		"employee": row.employee,
