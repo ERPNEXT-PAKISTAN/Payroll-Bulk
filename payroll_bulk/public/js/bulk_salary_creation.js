@@ -386,15 +386,37 @@ function bs_fill_field_select($select, fields, current_value, placeholder) {
   if ($select.val() !== (current_value || "")) $select.val("");
 }
 
+function bs_guess_source_field(fields, kind) {
+  const list = fields || [];
+  const picks = {
+    employee: ["employee", "employee_id", "employee_code"],
+    date: ["date", "posting_date", "attendance_date", "checkin_date"],
+    hours: ["hours", "total_hours", "working_hours", "overtime_hours", "total_overtime_hours"],
+    qty: ["qty", "quantity", "total_qty", "piece_qty", "production_qty"],
+    rate: ["hourly_rate", "rate", "piece_rate", "per_piece_rate"],
+  };
+  const wanted = picks[kind] || [];
+  const hit = list.find((df) => wanted.includes(String(df.fieldname || "").toLowerCase()));
+  return hit?.fieldname || "";
+}
+
 async function bs_refresh_source_field_options(frm) {
   const controls = window._bs.source_ctrls || {};
   const doctype_name = bs_control_get_value(controls.overtime_doctype);
   const fields = await bs_get_doctype_field_options(doctype_name);
-  bs_fill_field_select(controls.overtime_employee_field, bs_filter_source_fields(fields, "employee"), frm.doc.overtime_employee_field, "Select employee field");
-  bs_fill_field_select(controls.overtime_date_field, bs_filter_source_fields(fields, "date"), frm.doc.overtime_date_field, "Select date field");
-  bs_fill_field_select(controls.overtime_hours_field, bs_filter_source_fields(fields, "number"), frm.doc.overtime_hours_field, "Select total hours field");
-  bs_fill_field_select(controls.overtime_qty_field, bs_filter_source_fields(fields, "number"), frm.doc.overtime_qty_field, "Select total qty field");
-  bs_fill_field_select(controls.overtime_rate_field, bs_filter_source_fields(fields, "number"), frm.doc.overtime_rate_field, "Select rate per piece field");
+  const employee_fields = bs_filter_source_fields(fields, "employee");
+  const date_fields = bs_filter_source_fields(fields, "date");
+  const number_fields = bs_filter_source_fields(fields, "number");
+  frm.doc.overtime_employee_field = frm.doc.overtime_employee_field || bs_guess_source_field(employee_fields, "employee");
+  frm.doc.overtime_date_field = frm.doc.overtime_date_field || bs_guess_source_field(date_fields, "date");
+  frm.doc.overtime_hours_field = frm.doc.overtime_hours_field || bs_guess_source_field(number_fields, "hours");
+  frm.doc.overtime_qty_field = frm.doc.overtime_qty_field || bs_guess_source_field(number_fields, "qty");
+  frm.doc.overtime_rate_field = frm.doc.overtime_rate_field || bs_guess_source_field(number_fields, "rate");
+  bs_fill_field_select(controls.overtime_employee_field, employee_fields, frm.doc.overtime_employee_field, "Select employee field");
+  bs_fill_field_select(controls.overtime_date_field, date_fields, frm.doc.overtime_date_field, "Select date field");
+  bs_fill_field_select(controls.overtime_hours_field, number_fields, frm.doc.overtime_hours_field, "Select total hours field");
+  bs_fill_field_select(controls.overtime_qty_field, number_fields, frm.doc.overtime_qty_field, "Select total qty field");
+  bs_fill_field_select(controls.overtime_rate_field, number_fields, frm.doc.overtime_rate_field, "Select rate per piece field");
 }
 
 async function bs_bind_source_controls(frm, settings, $wrap) {
@@ -1006,10 +1028,10 @@ function make_row(employee, employee_name, department, designation, ctc) {
 function bs_get_component_totals(row) {
   const items = row.components || [];
   const earnings = items
-    .filter((item) => item.type === "Earning")
+    .filter((item) => item.type === "Earning" && !item.auto_calculated)
     .reduce((sum, item) => sum + (parseFloat(item.amount || 0) || 0), 0);
   const deductions = items
-    .filter((item) => item.type === "Deduction")
+    .filter((item) => item.type === "Deduction" && !item.auto_calculated)
     .reduce((sum, item) => sum + (parseFloat(item.amount || 0) || 0), 0);
   return { earnings, deductions };
 }
@@ -1030,12 +1052,14 @@ function bs_is_qty_component_name(component_name = "") {
   return /(qty|quantity|piece|per piece|production)/.test(bs_normalize_component_name(component_name));
 }
 
-function bs_is_excluded_structure_component(component_name = "", component_type = "") {
+function bs_get_component_role(component_name = "", component_type = "") {
   const value = bs_normalize_component_name(component_name);
-  if (!value) return true;
-  if (component_type === "Earning" && (bs_is_base_component_name(value) || bs_is_overtime_component_name(value) || bs_is_qty_component_name(value))) return true;
-  if (component_type === "Deduction" && /(advance)/.test(value)) return true;
-  return false;
+  if (!value) return "skip";
+  if (component_type === "Deduction" && /(advance)/.test(value)) return "advance";
+  if (component_type === "Earning" && bs_is_base_component_name(value)) return "base";
+  if (component_type === "Earning" && bs_is_overtime_component_name(value)) return "overtime";
+  if (component_type === "Earning" && bs_is_qty_component_name(value)) return "qty";
+  return "manual";
 }
 
 async function bs_get_salary_structure_doc(structure_name) {
@@ -1148,7 +1172,8 @@ function bs_build_row_components(row, structure_doc, options = {}) {
   const items = [];
   const seen = new Set();
   const push_component = (component, type) => {
-    if (!component || bs_is_excluded_structure_component(component, type)) return;
+    const role = bs_get_component_role(component, type);
+    if (!component || role === "skip" || role === "advance") return;
     const rule = rule_map[component];
     if (rule && !rule.enabled) return;
     const item_type = rule?.type || type;
@@ -1160,6 +1185,8 @@ function bs_build_row_components(row, structure_doc, options = {}) {
       component,
       label: component,
       type: item_type,
+      role,
+      auto_calculated: ["base", "overtime", "qty"].includes(role),
       amount: existing[key] || 0,
     });
   };
@@ -1190,6 +1217,19 @@ function bs_build_row_components(row, structure_doc, options = {}) {
       if (target) target.amount = legacy.amount;
     });
   }
+  const current_mode = window._bs.frm?.doc?.calculation_mode || "Manual";
+  items.forEach((item) => {
+    if (!item.auto_calculated) return;
+    if (item.role === "base") {
+      item.amount = parseFloat(row.base_pay || 0) || 0;
+    } else if (item.role === "overtime") {
+      item.amount = bs_is_piece_mode(current_mode)
+        ? (parseFloat(row.hours_amount || 0) || 0)
+        : (parseFloat(row.ot_amount || 0) || 0);
+    } else if (item.role === "qty") {
+      item.amount = parseFloat(row.qty_amount || 0) || 0;
+    }
+  });
   row.components = items;
 }
 
@@ -1279,9 +1319,9 @@ function bs_render_table() {
       .filter((item) => item.type === type)
       .map((item) => `
         <label class="bs-adjust-chip bs-adjust-chip-${type === "Earning" ? "earning" : "deduction"}" title="${frappe.utils.escape_html(item.label)}">
-          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
+          <input class="bs-input-sm ${item.auto_calculated ? "bs-adjust-input-auto" : "bs-editable"} bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
             placeholder="${frappe.utils.escape_html(item.label)}" value="${bs_input_value(item.amount)}" onfocus="this.select()"
-            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_component_amount(${r._id},'${encodeURIComponent(item.key)}',this.value)"/>
+            ${item.auto_calculated ? "readonly tabindex='-1'" : `onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_component_amount(${r._id},'${encodeURIComponent(item.key)}',this.value)"`}/>
         </label>`).join("");
     const earning_inputs = render_component_inputs("Earning");
     const deduction_inputs = render_component_inputs("Deduction");
@@ -1716,6 +1756,12 @@ function recalc_row(row) {
   }
 
   const component_totals = bs_get_component_totals(row);
+  (row.components || []).forEach((item) => {
+    if (!item.auto_calculated) return;
+    if (item.role === "base") item.amount = row.base_pay || 0;
+    if (item.role === "overtime") item.amount = bs_is_piece_mode(mode) ? (row.hours_amount || 0) : (row.ot_amount || 0);
+    if (item.role === "qty") item.amount = row.qty_amount || 0;
+  });
   row.total_additions = row.ot_amount + component_totals.earnings;
   row.total_deductions = (row.adv_deduct || 0) + component_totals.deductions;
   row.gross = row.base_pay + row.total_additions;
@@ -1946,7 +1992,7 @@ function bs_sync_to_frm(frm) {
     if (row.payment_entry) c.payment_entry = row.payment_entry;
 
     (row.components || [])
-      .filter((item) => item.component && parseFloat(item.amount || 0) > 0)
+      .filter((item) => item.component && !item.auto_calculated && parseFloat(item.amount || 0) > 0)
       .forEach((item) => {
         const component_row = frappe.model.add_child(frm.doc, "Bulk Salary Component Entry", "component_entries");
         component_row.employee_row = c.name || row.row_name || "";
@@ -3530,6 +3576,7 @@ function inject_bs_styles() {
     .bs-adjust-chip{display:flex;align-items:center;padding:0;border:none;background:transparent;min-height:auto}
     .bs-adjust-chip-earning .bs-adjust-input{background:#f3fcf6;border-color:#b7ebca;color:#166534}
     .bs-adjust-chip-deduction .bs-adjust-input{background:#fff5f5;border-color:#fecaca;color:#b91c1c}
+    .bs-adjust-input-auto{cursor:default;opacity:.95;font-weight:700}
     .bs-adjust-summary{display:flex;flex-direction:column;gap:4px}
     .bs-adjust-summary-chip{display:inline-flex;align-items:center;justify-content:center;padding:1px 6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;font-size:9px;font-weight:700}
     .bs-adjust-summary-empty{font-size:11px;color:var(--bs-muted)}
