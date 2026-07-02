@@ -2,6 +2,7 @@ frappe.ui.form.on("Payroll Bulk Settings", {
   refresh(frm) {
     pb_refresh_source_fields(frm);
     pb_bind_component_rule_query(frm);
+    pb_bind_component_queries(frm);
     pb_toggle_source_fields(frm);
     if (!frm.is_new()) {
       frm.add_custom_button(__("Load Components from Structures"), async () => {
@@ -63,6 +64,17 @@ function pb_bind_component_rule_query(frm) {
       },
     };
   };
+}
+
+function pb_bind_component_queries(frm) {
+  ["hours_component", "qty_component"].forEach((fieldname) => {
+    frm.set_query(fieldname, () => ({
+      filters: {
+        disabled: 0,
+        type: "Earning",
+      },
+    }));
+  });
 }
 
 async function pb_refresh_source_fields(frm) {

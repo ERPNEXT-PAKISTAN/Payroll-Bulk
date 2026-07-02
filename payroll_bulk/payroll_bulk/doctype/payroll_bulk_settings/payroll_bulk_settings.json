@@ -20,15 +20,17 @@
   "component_rules",
   "section_break_source_defaults",
   "default_calculation_mode",
-  "column_break_acvx",
   "overtime_doctype",
   "overtime_employee_field",
   "overtime_date_field",
-  "column_break_padl",
-  "default_per_piece_basis",
+  "column_break_acvx",
   "overtime_qty_field",
+  "qty_component",
+  "overtime_rate_field",
+  "column_break_padl",
   "overtime_hours_field",
-  "overtime_rate_field"
+  "hours_component",
+  "default_per_piece_basis"
  ],
  "fields": [
   {
@@ -145,6 +147,18 @@
    "label": "Rate per Piece Field"
   },
   {
+   "fieldname": "hours_component",
+   "fieldtype": "Link",
+   "label": "Hours Component",
+   "options": "Salary Component"
+  },
+  {
+   "fieldname": "qty_component",
+   "fieldtype": "Link",
+   "label": "Qty Component",
+   "options": "Salary Component"
+  },
+  {
    "fieldname": "section_break_components",
    "fieldtype": "Section Break",
    "label": "Component Configuration"
@@ -172,7 +186,7 @@
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-07-02 21:33:30.431531",
+ "modified": "2026-07-03 00:55:16.115778",
  "modified_by": "techcraft986@gmail.com",
  "module": "Payroll Bulk",
  "name": "Payroll Bulk Settings",

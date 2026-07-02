@@ -1056,6 +1056,12 @@
       "label": "Source Hours"
     },
     {
+      "default": "1",
+      "fieldname": "use_hours",
+      "fieldtype": "Check",
+      "label": "Use Hours"
+    },
+    {
       "fieldname": "piece_basis",
       "fieldtype": "Select",
       "label": "Piece Basis",
@@ -1101,6 +1107,12 @@
       "fieldname": "source_qty",
       "fieldtype": "Float",
       "label": "Source Qty"
+    },
+    {
+      "default": "1",
+      "fieldname": "use_qty",
+      "fieldtype": "Check",
+      "label": "Use Qty"
     },
     {
       "fieldname": "piece_rate",
@@ -2768,8 +2780,10 @@
     "ot_amount",
     "ot_input",
     "source_hours",
+    "use_hours",
     "piece_basis",
     "source_qty",
+    "use_qty",
     "piece_rate",
     "attendance_days",
     "absent_days",
