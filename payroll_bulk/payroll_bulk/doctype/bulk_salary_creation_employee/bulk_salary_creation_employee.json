@@ -1056,6 +1056,13 @@
       "label": "Source Hours"
     },
     {
+      "fieldname": "piece_basis",
+      "fieldtype": "Select",
+      "label": "Piece Basis",
+      "options": "Total Hours\nTotal Qty",
+      "default": "Total Hours"
+    },
+    {
       "fieldname": "attendance_days",
       "fieldtype": "Float",
       "label": "Attendance Days"
@@ -2761,6 +2768,7 @@
     "ot_amount",
     "ot_input",
     "source_hours",
+    "piece_basis",
     "source_qty",
     "piece_rate",
     "attendance_days",

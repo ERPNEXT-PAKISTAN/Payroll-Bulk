@@ -1,187 +1,197 @@
 {
-  "actions": [],
-  "creation": "2026-06-08 12:21:41.307246",
-  "doctype": "DocType",
-  "engine": "InnoDB",
-  "field_order": [
-    "company",
-    "section_break_filters",
-    "enable_filter_fetch",
-    "show_department_filter",
-    "show_branch_filter",
-    "show_designation_filter",
-    "column_break_filters",
-    "show_employee_filter",
-    "enable_manual_add",
-    "auto_hide_filters",
-    "default_submit_slips",
-    "section_break_components",
-    "auto_load_structure_components",
-    "component_rules",
-    "section_break_source_defaults",
-    "default_calculation_mode",
-    "default_per_piece_basis",
-    "overtime_doctype",
-    "overtime_employee_field",
-    "overtime_date_field",
-    "overtime_hours_field",
-    "overtime_qty_field",
-    "overtime_rate_field"
-  ],
-  "fields": [
-    {
-      "fieldname": "company",
-      "fieldtype": "Link",
-      "label": "Company",
-      "options": "Company"
-    },
-    {
-      "fieldname": "section_break_filters",
-      "fieldtype": "Section Break",
-      "label": "Filter Visibility"
-    },
-    {
-      "default": "1",
-      "fieldname": "enable_filter_fetch",
-      "fieldtype": "Check",
-      "label": "Enable Employee Filters"
-    },
-    {
-      "default": "1",
-      "fieldname": "show_department_filter",
-      "fieldtype": "Check",
-      "label": "Show Department Filter"
-    },
-    {
-      "default": "1",
-      "fieldname": "show_branch_filter",
-      "fieldtype": "Check",
-      "label": "Show Branch Filter"
-    },
-    {
-      "default": "1",
-      "fieldname": "show_designation_filter",
-      "fieldtype": "Check",
-      "label": "Show Designation Filter"
-    },
-    {
-      "fieldname": "column_break_filters",
-      "fieldtype": "Column Break"
-    },
-    {
-      "default": "1",
-      "fieldname": "show_employee_filter",
-      "fieldtype": "Check",
-      "label": "Show Employee Picker"
-    },
-    {
-      "default": "1",
-      "fieldname": "enable_manual_add",
-      "fieldtype": "Check",
-      "label": "Enable Add Employee"
-    },
-    {
-      "default": "1",
-      "fieldname": "auto_hide_filters",
-      "fieldtype": "Check",
-      "label": "Auto Hide Filters"
-    },
-    {
-      "default": "1",
-      "fieldname": "default_submit_slips",
-      "fieldtype": "Check",
-      "label": "Default Submit Slips"
-    },
-    {
-      "fieldname": "section_break_source_defaults",
-      "fieldtype": "Section Break",
-      "label": "Default Source Mapping"
-    },
-    {
-      "default": "Manual",
-      "fieldname": "default_calculation_mode",
-      "fieldtype": "Select",
-      "label": "Default Calculation Mode",
-      "options": "Manual\nAttendance Based\nCheckin Based\nPer Piece or Per Hour"
-    },
-    {
-      "default": "Total Hours",
-      "fieldname": "default_per_piece_basis",
-      "fieldtype": "Select",
-      "label": "Default Per Piece Basis",
-      "options": "Total Hours\nTotal Qty"
-    },
-    {
-      "fieldname": "overtime_doctype",
-      "fieldtype": "Link",
-      "label": "Custom Source DocType",
-      "options": "DocType"
-    },
-    {
-      "fieldname": "overtime_employee_field",
-      "fieldtype": "Select",
-      "label": "Employee Field"
-    },
-    {
-      "fieldname": "overtime_date_field",
-      "fieldtype": "Select",
-      "label": "Date Field"
-    },
-    {
-      "fieldname": "overtime_hours_field",
-      "fieldtype": "Select",
-      "label": "Total Hours Field"
-    },
-    {
-      "fieldname": "overtime_qty_field",
-      "fieldtype": "Select",
-      "label": "Total Qty Field"
-    },
-    {
-      "fieldname": "overtime_rate_field",
-      "fieldtype": "Select",
-      "label": "Rate per Piece Field"
-    },
-    {
-      "fieldname": "section_break_components",
-      "fieldtype": "Section Break",
-      "label": "Component Configuration"
-    },
-    {
-      "fieldname": "auto_load_structure_components",
-      "fieldtype": "Check",
-      "label": "Auto Load Components from Salary Structure",
-      "default": "1"
-    },
-    {
-      "fieldname": "component_rules",
-      "fieldtype": "Table",
-      "label": "Component Rules",
-      "options": "Payroll Bulk Component Setting"
-    }
-  ],
-  "issingle": 1,
-  "links": [],
-  "modified": "2026-07-02 20:20:00.000000",
-  "modified_by": "Administrator",
-  "module": "Payroll Bulk",
-  "name": "Payroll Bulk Settings",
-  "owner": "Administrator",
-  "permissions": [
-    {
-      "create": 1,
-      "delete": 1,
-      "email": 1,
-      "print": 1,
-      "read": 1,
-      "role": "System Manager",
-      "share": 1,
-      "write": 1
-    }
-  ],
-  "row_format": "Dynamic",
-  "sort_field": "modified",
-  "sort_order": "DESC",
-  "states": [],
-  "track_changes": 1
+ "actions": [],
+ "creation": "2026-06-08 12:21:41.307246",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "company",
+  "section_break_filters",
+  "enable_filter_fetch",
+  "show_department_filter",
+  "show_branch_filter",
+  "show_designation_filter",
+  "column_break_filters",
+  "show_employee_filter",
+  "enable_manual_add",
+  "auto_hide_filters",
+  "default_submit_slips",
+  "section_break_components",
+  "auto_load_structure_components",
+  "component_rules",
+  "section_break_source_defaults",
+  "default_calculation_mode",
+  "column_break_acvx",
+  "overtime_doctype",
+  "overtime_employee_field",
+  "overtime_date_field",
+  "column_break_padl",
+  "default_per_piece_basis",
+  "overtime_qty_field",
+  "overtime_hours_field",
+  "overtime_rate_field"
+ ],
+ "fields": [
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "section_break_filters",
+   "fieldtype": "Section Break",
+   "label": "Filter Visibility"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_filter_fetch",
+   "fieldtype": "Check",
+   "label": "Enable Employee Filters"
+  },
+  {
+   "default": "1",
+   "fieldname": "show_department_filter",
+   "fieldtype": "Check",
+   "label": "Show Department Filter"
+  },
+  {
+   "default": "1",
+   "fieldname": "show_branch_filter",
+   "fieldtype": "Check",
+   "label": "Show Branch Filter"
+  },
+  {
+   "default": "1",
+   "fieldname": "show_designation_filter",
+   "fieldtype": "Check",
+   "label": "Show Designation Filter"
+  },
+  {
+   "fieldname": "column_break_filters",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "show_employee_filter",
+   "fieldtype": "Check",
+   "label": "Show Employee Picker"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_manual_add",
+   "fieldtype": "Check",
+   "label": "Enable Add Employee"
+  },
+  {
+   "default": "1",
+   "fieldname": "auto_hide_filters",
+   "fieldtype": "Check",
+   "label": "Auto Hide Filters"
+  },
+  {
+   "default": "1",
+   "fieldname": "default_submit_slips",
+   "fieldtype": "Check",
+   "label": "Default Submit Slips"
+  },
+  {
+   "fieldname": "section_break_source_defaults",
+   "fieldtype": "Section Break",
+   "label": "Default Source Mapping"
+  },
+  {
+   "default": "Manual",
+   "fieldname": "default_calculation_mode",
+   "fieldtype": "Select",
+   "label": "Default Calculation Mode",
+   "options": "Manual\nAttendance Based\nCheckin Based\nPer Piece or Per Hour"
+  },
+  {
+   "default": "Total Hours",
+   "fieldname": "default_per_piece_basis",
+   "fieldtype": "Select",
+   "label": "Default Per Piece Basis",
+   "options": "Total Hours\nTotal Qty"
+  },
+  {
+   "fieldname": "overtime_doctype",
+   "fieldtype": "Link",
+   "label": "Custom Source DocType",
+   "options": "DocType"
+  },
+  {
+   "fieldname": "overtime_employee_field",
+   "fieldtype": "Select",
+   "label": "Employee Field"
+  },
+  {
+   "fieldname": "overtime_date_field",
+   "fieldtype": "Select",
+   "label": "Date Field"
+  },
+  {
+   "fieldname": "overtime_hours_field",
+   "fieldtype": "Select",
+   "label": "Total Hours Field"
+  },
+  {
+   "fieldname": "overtime_qty_field",
+   "fieldtype": "Select",
+   "label": "Total Qty Field"
+  },
+  {
+   "fieldname": "overtime_rate_field",
+   "fieldtype": "Select",
+   "label": "Rate per Piece Field"
+  },
+  {
+   "fieldname": "section_break_components",
+   "fieldtype": "Section Break",
+   "label": "Component Configuration"
+  },
+  {
+   "default": "1",
+   "fieldname": "auto_load_structure_components",
+   "fieldtype": "Check",
+   "label": "Auto Load Components from Salary Structure"
+  },
+  {
+   "fieldname": "component_rules",
+   "fieldtype": "Table",
+   "label": "Component Rules",
+   "options": "Payroll Bulk Component Setting"
+  },
+  {
+   "fieldname": "column_break_acvx",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_padl",
+   "fieldtype": "Column Break"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-02 21:33:30.431531",
+ "modified_by": "techcraft986@gmail.com",
+ "module": "Payroll Bulk",
+ "name": "Payroll Bulk Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
 }

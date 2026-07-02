@@ -101,6 +101,10 @@ function bs_get_component_rules() {
   return (window._bs.settings?.component_rules || []).filter((row) => row && row.salary_component);
 }
 
+function bs_get_enabled_component_rules() {
+  return bs_get_component_rules().filter((row) => bs_to_int(row.enabled, 1) === 1);
+}
+
 function bs_get_saved_components_map(frm) {
   const grouped = {};
   (frm.doc.component_entries || []).forEach((entry) => {
@@ -298,9 +302,6 @@ function bs_normalize_source_values(values) {
   }
   if (bs_is_piece_mode(mode)) {
     next.overtime_source = "Manual";
-    next.overtime_hours_field = next.per_piece_basis === "Total Hours" ? next.overtime_hours_field : "";
-    next.overtime_qty_field = next.per_piece_basis === "Total Qty" ? next.overtime_qty_field : "";
-    next.overtime_rate_field = next.per_piece_basis === "Total Qty" ? next.overtime_rate_field : "";
   } else {
     next.per_piece_basis = next.per_piece_basis || "Total Hours";
   }
@@ -331,27 +332,22 @@ function bs_refresh_source_ui() {
   if (!frm || !controls.calculation_mode) return;
 
   const mode = bs_control_get_value(controls.calculation_mode) || "Manual";
-  const per_piece_basis = bs_control_get_value(controls.per_piece_basis) || "Total Hours";
   const use_piece = bs_is_piece_mode(mode);
   const use_custom = use_piece;
   const use_attendance_loader = ["Attendance Based", "Checkin Based"].includes(mode);
   const show_manual_note = mode === "Manual";
-  const show_hours_field = use_custom && (!use_piece || per_piece_basis === "Total Hours");
-  const show_qty_rate_fields = use_piece && per_piece_basis === "Total Qty";
 
   $(".bs-overtime-source-field").hide();
   $(".bs-source-map-field").toggle(use_custom);
-  $(".bs-source-hours-field").toggle(show_hours_field);
-  $(".bs-source-map-piece").toggle(show_qty_rate_fields);
+  $(".bs-source-hours-field").toggle(use_custom);
+  $(".bs-source-map-piece").toggle(use_custom);
   $(".bs-per-piece-basis-field").toggle(use_piece);
   $("#bs-load-source-btn").toggle(!show_manual_note && (use_custom || use_attendance_loader));
 
   let note = "Manual mode uses direct entry for base pay and overtime.";
   if (mode === "Attendance Based") note = "Attendance Based: Basic Pay = CTC / 30 × present days from Attendance. Overtime stays manual in each employee row.";
   if (mode === "Checkin Based") note = "Checkin Based: Basic Pay = CTC / 30 × unique checkin days. Overtime auto-loads from last checkin minus first checkin.";
-  if (bs_is_piece_mode(mode)) note = per_piece_basis === "Total Hours"
-    ? "Basic Pay = (CTC / 30 / 8) × Total Hours from the selected custom DocType."
-    : "Basic Pay = Total Qty × Rate per Piece from the selected custom DocType.";
+  if (bs_is_piece_mode(mode)) note = "Per Piece or Per Hour: each employee row can use Hours or Qty. Hours use (CTC / 30 / 8) × Hours. Qty uses Qty × Rate.";
   $("#bs-source-note").text(note);
 }
 
@@ -525,6 +521,7 @@ function render_main_ui(frm) {
           type: item.component_type || "Earning",
           amount: parseFloat(item.amount || 0),
         })),
+        piece_basis: r.piece_basis || frm.doc.per_piece_basis || settings.default_per_piece_basis || "Total Hours",
       });
       recalc_row(window._bs.rows[window._bs.rows.length - 1]);
     });
@@ -959,7 +956,7 @@ function bs_quick_add() {
     frappe.call({
       method: "frappe.client.get_value",
       args: { doctype:"Employee", filters:{ name:emp_id },
-              fieldname:["employee_name","department","designation","ctc"] },
+              fieldname:["employee_name","department","designation","ctc","company"] },
       async callback(r) {
         const m = r.message || {};
         const active_company = bs_get_active_company();
@@ -982,6 +979,7 @@ function make_row(employee, employee_name, department, designation, ctc) {
     department: department||"", designation: designation||"",
     ctc, ot_type:"hours", ot_input:0, ot_amount:0,
     source_hours:0, source_qty:0, piece_rate:0,
+    piece_basis: window._bs.frm?.doc?.per_piece_basis || window._bs.settings?.default_per_piece_basis || "Total Hours",
     attendance_days:0, absent_days:0, attendance_hours:0, payment_days:0,
     worked_hours:0, shift_hours:0, overtime_hours:0,
     bonus_amount:0, other_allowance:0,
@@ -1048,23 +1046,33 @@ function bs_build_row_components(row, structure_doc) {
 
   const { has_rules, map: rule_map } = bs_component_rule_map();
   const items = [];
+  const seen = new Set();
+  const push_component = (component, type) => {
+    if (!component || bs_is_excluded_structure_component(component, type)) return;
+    const rule = rule_map[component];
+    if (rule && !rule.enabled) return;
+    const item_type = rule?.type || type;
+    const key = `${item_type}::${component}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    items.push({
+      key,
+      component,
+      label: component,
+      type: item_type,
+      amount: existing[key] || 0,
+    });
+  };
   const push_items = (component_rows, type) => {
     (component_rows || []).forEach((item) => {
-      const component = item.salary_component;
-      if (!component || bs_is_excluded_structure_component(component, type)) return;
-      const rule = rule_map[component];
-      if (has_rules && (!rule || !rule.enabled)) return;
-      items.push({
-        key: `${type}::${component}`,
-        component,
-        label: component,
-        type: rule?.type || type,
-        amount: existing[`${type}::${component}`] || 0,
-      });
+      push_component(item.salary_component, type);
     });
   };
   push_items(structure_doc?.earnings, "Earning");
   push_items(structure_doc?.deductions, "Deduction");
+  bs_get_enabled_component_rules().forEach((rule) => {
+    push_component(rule.salary_component, rule.component_type || "Earning");
+  });
   if (!Object.keys(existing).length) {
     const legacy_map = [
       { amount: parseFloat(row.other_allowance || 0), type: "Earning", keywords: ["allowance"] },
@@ -1127,7 +1135,7 @@ function bs_render_table() {
     const hourly = r.ctc / 30 / 8;
     const mode = window._bs.frm?.doc?.calculation_mode || "Manual";
     const attendance_source = bs_get_mode_attendance_source(mode);
-    const per_piece_basis = window._bs.frm?.doc?.per_piece_basis || "Total Hours";
+    const per_piece_basis = r.piece_basis || window._bs.frm?.doc?.per_piece_basis || "Total Hours";
     const slip_html = r.salary_slip
       ? `<a href="/app/salary-slip/${r.salary_slip}" target="_blank" class="bs-mono">${r.salary_slip}</a>`
       : `<span style="color:var(--bs-muted)">—</span>`;
@@ -1164,16 +1172,24 @@ function bs_render_table() {
          </button>`;
 
     const component_totals = bs_get_component_totals(r);
-    const component_inputs = (r.components || []).map((item) => `
-      <label class="bs-adjust-item">
-        <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
-          placeholder="${frappe.utils.escape_html(item.label)}" value="${bs_input_value(item.amount)}" onfocus="this.select()"
-          onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_component_amount(${r._id},'${encodeURIComponent(item.key)}',this.value)"/>
-      </label>`).join("");
-    const adjustments_html = component_inputs
-      ? `<div class="bs-adjust-grid bs-adjust-grid-row">${component_inputs}</div>`
-      : `<div class="bs-source-inline bs-source-inline-adjust"><span>No structure components configured</span></div>`;
-    const adjustments_cell_html = component_inputs
+    const render_component_inputs = (type) => (r.components || [])
+      .filter((item) => item.type === type)
+      .map((item) => `
+        <label class="bs-adjust-chip bs-adjust-chip-${type === "Earning" ? "earning" : "deduction"}">
+          <span class="bs-adjust-chip-label">${frappe.utils.escape_html(item.label)}</span>
+          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
+            placeholder="0" value="${bs_input_value(item.amount)}" onfocus="this.select()"
+            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_component_amount(${r._id},'${encodeURIComponent(item.key)}',this.value)"/>
+        </label>`).join("");
+    const earning_inputs = render_component_inputs("Earning");
+    const deduction_inputs = render_component_inputs("Deduction");
+    const adjustments_html = (earning_inputs || deduction_inputs)
+      ? `<div class="bs-adjust-row-wrap">
+          ${earning_inputs ? `<div class="bs-adjust-line"><span class="bs-adjust-line-title bs-adjust-line-title-earning">Earnings</span><div class="bs-adjust-line-items">${earning_inputs}</div></div>` : ``}
+          ${deduction_inputs ? `<div class="bs-adjust-line"><span class="bs-adjust-line-title bs-adjust-line-title-deduction">Deductions</span><div class="bs-adjust-line-items">${deduction_inputs}</div></div>` : ``}
+        </div>`
+      : `<div class="bs-source-inline bs-source-inline-adjust"><span>No components configured</span></div>`;
+    const adjustments_cell_html = (earning_inputs || deduction_inputs)
       ? `<div class="bs-adjust-summary">
           <span class="bs-adjust-summary-chip">Earn ${fmt_num(component_totals.earnings)}</span>
           <span class="bs-adjust-summary-chip">Ded ${fmt_num(component_totals.deductions)}</span>
@@ -1207,6 +1223,10 @@ function bs_render_table() {
     const work_input_html = bs_is_piece_mode(mode)
       ? `
           <div class="bs-ot-row bs-ot-row-piece">
+            <select class="bs-select-sm bs-editable" onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_piece_basis(${r._id},this.value)">
+              <option value="Total Hours" ${per_piece_basis==="Total Hours"?"selected":""}>Hours</option>
+              <option value="Total Qty" ${per_piece_basis==="Total Qty"?"selected":""}>Qty</option>
+            </select>
             ${per_piece_basis === "Total Hours"
               ? `<input class="bs-input-sm bs-editable" type="number" min="0" step="0.01" inputmode="decimal"
                     placeholder="Hours" value="${bs_input_value(r.source_hours)}" onfocus="this.select()"
@@ -1218,7 +1238,7 @@ function bs_render_table() {
                     placeholder="Rate" value="${bs_input_value(r.piece_rate)}" onfocus="this.select()"
                     onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'piece_rate',this.value)"/>
                 `}
-            <span class="bs-ot-amount">Base ${fmt_num(r.base_pay)}</span>
+            <span class="bs-ot-amount">${per_piece_basis === "Total Hours" ? `Base ${fmt_num(r.base_pay)}` : `Qty ${fmt_num(r.source_qty, 2)} × ${fmt_num(r.piece_rate, 2)}`}</span>
           </div>
           `
       : `
@@ -1381,6 +1401,14 @@ window.bs_update_amount = (id, fieldname, val) => {
   bs_render_table();
 };
 
+window.bs_update_piece_basis = (id, val) => {
+  const row = window._bs.rows.find((r) => r._id === id);
+  if (!row) return;
+  row.piece_basis = val || "Total Hours";
+  recalc_row(row);
+  bs_render_table();
+};
+
 window.bs_update_component_amount = (id, encoded_key, val) => {
   const row = window._bs.rows.find((r) => r._id === id);
   if (!row) return;
@@ -1535,10 +1563,9 @@ function bs_open_submitted_slips() {
 }
 
 function recalc_row(row) {
-  const settings = window._bs.settings || bs_default_settings();
   const frm = window._bs.frm || { doc: {} };
   const mode = frm.doc.calculation_mode || "Manual";
-  const per_piece_basis = frm.doc.per_piece_basis || "Total Hours";
+  const per_piece_basis = row.piece_basis || frm.doc.per_piece_basis || "Total Hours";
   const daily = row.ctc / 30;
   const hourly = daily / 8;
 
@@ -1646,13 +1673,9 @@ async function bs_load_source_data() {
       ["overtime_employee_field", "Employee Field"],
       ["overtime_date_field", "Date Field"],
     ];
-    if (bs_is_piece_mode(mode)) {
-      if ((frm.doc.per_piece_basis || "Total Hours") === "Total Qty") {
-        required.push(["overtime_qty_field", "Total Qty Field"]);
-        required.push(["overtime_rate_field", "Rate per Piece Field"]);
-      } else {
-        required.push(["overtime_hours_field", "Total Hours Field"]);
-      }
+    if (bs_is_piece_mode(mode) && !frm.doc.overtime_hours_field && !frm.doc.overtime_qty_field) {
+      frappe.show_alert({ message: "Set Total Hours Field or Total Qty Field.", indicator: "red" }, 4);
+      return;
     }
     for (const [fieldname, label] of required) {
       if (!frm.doc[fieldname]) {
@@ -1780,6 +1803,7 @@ function bs_sync_to_frm(frm) {
     c.ot_type         = row.ot_type === "days" ? "Days" : "Hours";
     c.ot_input        = row.ot_input;
     c.ot_amount       = row.ot_amount;
+    c.piece_basis     = row.piece_basis || frm.doc.per_piece_basis || "Total Hours";
     c.source_hours    = row.source_hours || 0;
     c.source_qty      = row.source_qty || 0;
     c.piece_rate      = row.piece_rate || 0;
@@ -3343,10 +3367,18 @@ function inject_bs_styles() {
     .bs-row-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
     .bs-row-actions-compact{margin-top:4px}
     .bs-adjust-grid{display:grid;grid-template-columns:repeat(2,minmax(74px,1fr));gap:4px 8px}
-    .bs-adjust-grid-row{grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:2px 6px;align-items:end}
-    .bs-adjust-grid label{display:flex;flex-direction:column;gap:2px;font-size:9.5px;color:#475569;font-weight:700;line-height:1}
-    .bs-adjust-grid label span{display:block}
-    .bs-adjust-item{display:block}
+    .bs-adjust-row-wrap{display:flex;flex-direction:column;gap:6px;width:100%}
+    .bs-adjust-line{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;width:100%}
+    .bs-adjust-line-title{display:inline-flex;align-items:center;justify-content:center;min-width:74px;height:24px;padding:0 10px;border-radius:6px;font-size:10px;font-weight:800}
+    .bs-adjust-line-title-earning{background:#ecfdf5;border:1px solid #bbf7d0;color:#166534}
+    .bs-adjust-line-title-deduction{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c}
+    .bs-adjust-line-items{display:flex;flex-wrap:wrap;gap:6px;flex:1}
+    .bs-adjust-chip{display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid var(--bs-border);border-radius:6px;min-height:30px}
+    .bs-adjust-chip-earning{background:#f3fcf6;border-color:#d1fae5}
+    .bs-adjust-chip-deduction{background:#fff5f5;border-color:#fee2e2}
+    .bs-adjust-chip-label{font-size:10px;font-weight:700;white-space:nowrap}
+    .bs-adjust-chip-earning .bs-adjust-chip-label{color:#166534}
+    .bs-adjust-chip-deduction .bs-adjust-chip-label{color:#b91c1c}
     .bs-adjust-summary{display:flex;flex-direction:column;gap:4px}
     .bs-adjust-summary-chip{display:inline-flex;align-items:center;justify-content:center;padding:1px 6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;font-size:9px;font-weight:700}
     .bs-adjust-summary-empty{font-size:11px;color:var(--bs-muted)}
@@ -3363,7 +3395,7 @@ function inject_bs_styles() {
     .bs-floating-field .control-input-wrapper input{min-height:24px;height:24px;padding:2px 7px;border-radius:4px;font-size:10px}
     .bs-floating-field .awesomplete input{min-height:24px;height:24px;padding:2px 7px;border-radius:4px;font-size:10px}
     .bs-input-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:4px;padding:2px 6px;font-size:10px;width:56px;min-height:24px}
-    .bs-adjust-input{width:100%;height:24px;border-radius:4px;padding:2px 8px;text-align:left}
+    .bs-adjust-input{width:76px;height:22px;border-radius:4px;padding:2px 8px;text-align:left;background:#fff}
     .bs-adjust-input::placeholder{color:#64748b;opacity:1;font-size:9px}
     .bs-input-sm[type=number]::-webkit-outer-spin-button,.bs-input-sm[type=number]::-webkit-inner-spin-button,.bs-adv-input[type=number]::-webkit-outer-spin-button,.bs-adv-input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
     .bs-input-sm[type=number],.bs-adv-input[type=number]{-moz-appearance:textfield;appearance:textfield}
