@@ -10,19 +10,6 @@ app_license = "mit"
 
 # required_apps = []
 
-# Each item in the list will be shown as an app in the apps page
-add_to_apps_screen = [
-	{
-		"name": "payroll_bulk",
-		"title": "Payroll Bulk",
-		"route": "/desk/payroll-bulk",
-		"logo": "/assets/payroll_bulk/payroll_bulk_logo.svg",
-	}
-]
-
-app_home = "/desk/payroll-bulk"
-app_logo_url = "/assets/payroll_bulk/payroll_bulk_logo.svg"
-
 # Includes in <head>
 # ------------------
 

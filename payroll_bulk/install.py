@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 
 import frappe
@@ -7,12 +8,12 @@ import frappe
 
 def after_install():
 	_disable_legacy_scripts()
-	_sync_desk()
+	_cleanup_navigation_records()
 
 
 def after_migrate():
 	_disable_legacy_scripts()
-	_sync_desk()
+	_cleanup_navigation_records()
 
 
 def _disable_legacy_scripts():
@@ -23,203 +24,88 @@ def _disable_legacy_scripts():
 			frappe.db.set_value("Server Script", name, "disabled", 1, update_modified=False)
 
 
-def _sync_desk():
-	_sync_workspace()
-	_sync_workspace_sidebar()
-	_sync_workspace_sidebar_items()
-	_sync_desktop_icon()
-	_remove_legacy_desk_items()
+def _cleanup_navigation_records():
+	_remove_missing_app_artifacts("main_reporting", ["Main Reporting", "Main Reports"])
+	_remove_missing_app_artifacts("dashboarding", ["Dashboarding"])
+	_cleanup_desktop_layout_entries({"Dashboarding", "Main Reporting", "Main Reports"})
+	_ensure_payroll_bulk_in_desktop_layout()
 
 
-def _sync_workspace():
-	content = [
-		{"id": "pb_001", "type": "header", "data": {"text": "Payroll Bulk Workspace", "col": 12}},
-		{
-			"id": "pb_002",
-			"type": "paragraph",
-			"data": {
-				"text": "Manage bulk salary batches, employee review, payroll settings, and reports from one place.",
-				"col": 12,
-			},
-		},
-		{"id": "pb_003", "type": "shortcut", "data": {"shortcut_name": "Bulk Salary Creation", "col": 3}},
-		{"id": "pb_004", "type": "shortcut", "data": {"shortcut_name": "Employee Rows", "col": 3}},
-		{"id": "pb_005", "type": "shortcut", "data": {"shortcut_name": "Payroll Bulk Settings", "col": 3}},
-		{"id": "pb_006", "type": "shortcut", "data": {"shortcut_name": "Batch Summary Report", "col": 3}},
-		{"id": "pb_007", "type": "shortcut", "data": {"shortcut_name": "Employee Detail Report", "col": 3}},
-		{"id": "pb_008", "type": "spacer", "data": {"col": 12}},
-		{"id": "pb_009", "type": "header", "data": {"text": "Browse Links", "col": 12}},
-		{"id": "pb_010", "type": "card", "data": {"card_name": "Operations", "col": 4}},
-		{"id": "pb_011", "type": "card", "data": {"card_name": "Setup", "col": 4}},
-		{"id": "pb_012", "type": "card", "data": {"card_name": "Reports", "col": 4}},
-	]
-	links = [
-		{"type": "Card Break", "label": "Operations", "link_count": 2},
-		{"type": "Link", "label": "Bulk Salary Creation", "link_type": "DocType", "link_to": "Bulk Salary Creation"},
-		{
-			"type": "Link",
-			"label": "Bulk Salary Creation Employee",
-			"link_type": "DocType",
-			"link_to": "Bulk Salary Creation Employee",
-		},
-		{"type": "Card Break", "label": "Setup", "link_count": 1},
-		{"type": "Link", "label": "Payroll Bulk Settings", "link_type": "DocType", "link_to": "Payroll Bulk Settings"},
-		{"type": "Card Break", "label": "Reports", "link_count": 2},
-		{
-			"type": "Link",
-			"label": "Bulk Salary Creation Summary",
-			"link_type": "Report",
-			"link_to": "Bulk Salary Creation Summary",
-		},
-		{
-			"type": "Link",
-			"label": "Bulk Salary Employee Detail",
-			"link_type": "Report",
-			"link_to": "Bulk Salary Employee Detail",
-		},
-	]
-	shortcuts = [
-		{"label": "Bulk Salary Creation", "link_to": "Bulk Salary Creation", "type": "DocType", "color": "Blue"},
-		{"label": "Employee Rows", "link_to": "Bulk Salary Creation Employee", "type": "DocType", "color": "Cyan"},
-		{"label": "Payroll Bulk Settings", "link_to": "Payroll Bulk Settings", "type": "DocType", "color": "Orange"},
-		{
-			"label": "Batch Summary Report",
-			"link_to": "Bulk Salary Creation Summary",
-			"type": "Report",
-			"color": "Green",
-			"report_ref_doctype": "Bulk Salary Creation",
-		},
-		{
-			"label": "Employee Detail Report",
-			"link_to": "Bulk Salary Employee Detail",
-			"type": "Report",
-			"color": "Purple",
-			"report_ref_doctype": "Bulk Salary Creation Employee",
-		},
-	]
-	roles = [{"role": "System Manager"}, {"role": "HR Manager"}, {"role": "HR User"}]
+def _remove_missing_app_artifacts(app_name: str, labels: list[str]):
+	if importlib.util.find_spec(app_name):
+		return
 
-	if frappe.db.exists("Workspace", "Payroll Bulk"):
-		workspace = frappe.get_doc("Workspace", "Payroll Bulk")
-	else:
-		workspace = frappe.new_doc("Workspace")
-		workspace.name = "Payroll Bulk"
+	if frappe.db.exists("Installed Application", app_name):
+		frappe.delete_doc("Installed Application", app_name, force=1, ignore_permissions=True)
 
-	workspace.title = "Payroll Bulk"
-	workspace.label = "Payroll Bulk"
-	workspace.module = "Payroll Bulk"
-	workspace.app = "payroll_bulk"
-	workspace.public = 1
-	workspace.is_hidden = 0
-	workspace.icon = "octicon octicon-briefcase"
-	workspace.indicator_color = "blue"
-	workspace.sequence_id = 15.0
-	workspace.type = "Workspace"
-	workspace.content = json.dumps(content, separators=(",", ":"))
-	workspace.parent_page = ""
-	workspace.for_user = ""
-	workspace.hide_custom = 0
-
-	workspace.set("links", [])
-	for row in links:
-		workspace.append("links", row)
-
-	workspace.set("shortcuts", [])
-	for row in shortcuts:
-		workspace.append("shortcuts", row)
-
-	workspace.set("roles", [])
-	for row in roles:
-		workspace.append("roles", row)
-
-	workspace.save(ignore_permissions=True)
-	frappe.clear_cache()
+	for doctype, fieldnames in {
+		"Workspace": ["name", "title", "app", "module"],
+		"Workspace Sidebar": ["name", "title", "app", "module"],
+		"Desktop Icon": ["name", "label", "app", "parent_icon", "link_to"],
+	}.items():
+		for fieldname in fieldnames:
+			for value in [app_name, *labels]:
+				names = frappe.get_all(doctype, filters={fieldname: value}, pluck="name")
+				for name in names:
+					frappe.delete_doc(doctype, name, force=1, ignore_permissions=True)
 
 
-def _sync_workspace_sidebar():
-	filters = {"title": "Payroll Bulk"}
-	if frappe.db.exists("Workspace Sidebar", filters):
-		sidebar = frappe.get_doc("Workspace Sidebar", filters)
-	else:
-		sidebar = frappe.new_doc("Workspace Sidebar")
-
-	sidebar.title = "Payroll Bulk"
-	sidebar.module = "Payroll Bulk"
-	sidebar.app = "payroll_bulk"
-	sidebar.header_icon = "briefcase"
-	sidebar.save(ignore_permissions=True)
+def _cleanup_desktop_layout_entries(stale_labels: set[str]):
+	for layout_name in frappe.get_all("Desktop Layout", pluck="name"):
+		layout_doc = frappe.get_doc("Desktop Layout", layout_name)
+		layout_items = json.loads(layout_doc.layout or "[]")
+		filtered_items = [item for item in layout_items if not _is_stale_layout_item(item, stale_labels)]
+		if len(filtered_items) != len(layout_items):
+			layout_doc.layout = json.dumps(filtered_items)
+			layout_doc.save(ignore_permissions=True)
 
 
-def _sync_workspace_sidebar_items():
-	sidebar = frappe.get_doc("Workspace Sidebar", {"title": "Payroll Bulk"})
+def _is_stale_layout_item(item: dict, stale_labels: set[str]) -> bool:
+	if not isinstance(item, dict):
+		return False
 
-	items = [
-		{"label": "Payroll Bulk", "link_type": "Workspace", "link_to": "Payroll Bulk", "type": "Link"},
-		{
-			"label": "Bulk Salary Creation",
-			"link_type": "DocType",
-			"link_to": "Bulk Salary Creation",
-			"type": "Link",
-		},
-		{
-			"label": "Bulk Salary Creation Employee",
-			"link_type": "DocType",
-			"link_to": "Bulk Salary Creation Employee",
-			"type": "Link",
-		},
-		{
-			"label": "Payroll Bulk Settings",
-			"link_type": "DocType",
-			"link_to": "Payroll Bulk Settings",
-			"type": "Link",
-		},
-		{
-			"label": "Bulk Salary Creation Summary",
-			"link_type": "Report",
-			"link_to": "Bulk Salary Creation Summary",
-			"type": "Link",
-		},
-		{
-			"label": "Bulk Salary Employee Detail",
-			"link_type": "Report",
-			"link_to": "Bulk Salary Employee Detail",
-			"type": "Link",
-		},
-	]
-
-	sidebar.set("items", [])
-	for row in items:
-		sidebar.append("items", row)
-
-	sidebar.save(ignore_permissions=True)
+	workspace = item.get("workspace") if isinstance(item.get("workspace"), dict) else {}
+	for value in (
+		item.get("label"),
+		item.get("name"),
+		item.get("link_to"),
+		item.get("parent_icon"),
+		workspace.get("label"),
+	):
+		if value in stale_labels:
+			return True
+	return False
 
 
-def _sync_desktop_icon():
-	if frappe.db.exists("Desktop Icon", "Payroll Bulk"):
-		icon = frappe.get_doc("Desktop Icon", "Payroll Bulk")
-	else:
-		icon = frappe.new_doc("Desktop Icon")
-		icon.name = "Payroll Bulk"
+def _ensure_payroll_bulk_in_desktop_layout():
+	if not frappe.db.exists("Desktop Icon", "Payroll Bulk"):
+		return
 
-	icon.label = "Payroll Bulk"
-	icon.app = "payroll_bulk"
-	icon.module_name = "Payroll Bulk"
-	icon.link_type = "Workspace Sidebar"
-	icon.link_to = "Payroll Bulk"
-	icon.standard = 0
-	icon.hidden = 0
-	icon.icon = "briefcase"
-	icon.color = "blue"
-	icon.save(ignore_permissions=True)
+	layout_icon = {
+		"label": "Payroll Bulk",
+		"bg_color": None,
+		"link": None,
+		"link_type": "Workspace Sidebar",
+		"app": "payroll_bulk",
+		"icon_type": "Link",
+		"parent_icon": None,
+		"icon": "briefcase",
+		"link_to": "Payroll Bulk",
+		"idx": 999,
+		"standard": 1,
+		"logo_url": "/assets/payroll_bulk/payroll_bulk_logo.svg",
+		"hidden": 0,
+		"name": "Payroll Bulk",
+		"restrict_removal": 0,
+		"icon_image": None,
+		"child_icons": [],
+	}
 
-
-def _remove_legacy_desk_items():
-	if frappe.db.exists("Desktop Icon", "Dashboarding"):
-		frappe.delete_doc("Desktop Icon", "Dashboarding", ignore_permissions=True, force=True)
-
-	if frappe.db.exists("Workspace Sidebar", {"title": "Dashboarding"}):
-		doc = frappe.get_doc("Workspace Sidebar", {"title": "Dashboarding"})
-		doc.delete(ignore_permissions=True, force=True)
-
-	if frappe.db.exists("Workspace", "Dashboarding"):
-		frappe.delete_doc("Workspace", "Dashboarding", ignore_permissions=True, force=True)
+	for layout_name in frappe.get_all("Desktop Layout", pluck="name"):
+		layout_doc = frappe.get_doc("Desktop Layout", layout_name)
+		layout_items = json.loads(layout_doc.layout or "[]")
+		if any(item.get("label") == "Payroll Bulk" or item.get("name") == "Payroll Bulk" for item in layout_items if isinstance(item, dict)):
+			continue
+		layout_items.append(layout_icon)
+		layout_doc.layout = json.dumps(layout_items)
+		layout_doc.save(ignore_permissions=True)

@@ -61,6 +61,7 @@ def get_bulk_source_values(
 	rate_field: str | None = None,
 	start_date: str | None = None,
 	end_date: str | None = None,
+	batch_name: str | None = None,
 ):
 	if isinstance(employees, str):
 		employees = frappe.parse_json(employees)
@@ -75,13 +76,19 @@ def get_bulk_source_values(
 	qty_field = _validate_field(meta, qty_field or "")
 	rate_field = _validate_field(meta, rate_field or "")
 
-	fields = [employee_field]
+	fields = ["name", employee_field]
 	if hours_field:
 		fields.append(hours_field)
 	if qty_field:
 		fields.append(qty_field)
 	if rate_field:
 		fields.append(rate_field)
+	has_bulk_payroll_field = bool(meta.get_field("bulk_payroll"))
+	has_salary_slip_field = bool(meta.get_field("salary_slip"))
+	if has_bulk_payroll_field:
+		fields.append("bulk_payroll")
+	if has_salary_slip_field:
+		fields.append("salary_slip")
 
 	filters = [[employee_field, "in", employees]]
 	if start_date:
@@ -92,9 +99,13 @@ def get_bulk_source_values(
 		filters.append(["docstatus", "=", 1])
 
 	rows = frappe.get_all(source_doctype, filters=filters, fields=fields, limit_page_length=5000)
-	result = {employee: {"hours": 0.0, "qty": 0.0, "rate": 0.0} for employee in employees}
+	result = {employee: {"hours": 0.0, "qty": 0.0, "rate": 0.0, "row_names": []} for employee in employees}
 
 	for row in rows:
+		if has_salary_slip_field and row.get("salary_slip"):
+			continue
+		if has_bulk_payroll_field and row.get("bulk_payroll") and row.get("bulk_payroll") != batch_name:
+			continue
 		employee = row.get(employee_field)
 		if employee not in result:
 			continue
@@ -110,11 +121,42 @@ def get_bulk_source_values(
 			item["rate"] = total_amount / item["qty"] if item["qty"] else 0.0
 		elif rate:
 			item["rate"] = rate
+		item["row_names"].append(row.get("name"))
 
 	for item in result.values():
 		item.pop("_amount", None)
 
 	return result
+
+
+@frappe.whitelist()
+def mark_bulk_source_rows(
+	source_doctype: str,
+	row_names: list[str] | str,
+	batch_name: str | None = None,
+	salary_slip: str | None = None,
+):
+	if isinstance(row_names, str):
+		row_names = frappe.parse_json(row_names)
+	row_names = [name for name in (row_names or []) if name]
+	if not source_doctype or not row_names:
+		return {"updated": 0}
+
+	meta = frappe.get_meta(source_doctype)
+	values = {}
+	if batch_name and meta.get_field("bulk_payroll"):
+		values["bulk_payroll"] = batch_name
+	if salary_slip and meta.get_field("salary_slip"):
+		values["salary_slip"] = salary_slip
+	if not values:
+		return {"updated": 0}
+
+	updated = 0
+	for row_name in row_names:
+		if frappe.db.exists(source_doctype, row_name):
+			frappe.db.set_value(source_doctype, row_name, values, update_modified=False)
+			updated += 1
+	return {"updated": updated}
 
 
 @frappe.whitelist()
@@ -288,6 +330,29 @@ def get_bulk_checkin_overtime_values(
 		item["overtime_hours"] += overtime_hours
 
 	return result
+
+
+@frappe.whitelist()
+def get_employee_advance_balance(employee: str):
+	if not employee:
+		return {"employee": "", "balance": 0.0, "count": 0}
+
+	rows = frappe.get_all(
+		"Employee Advance",
+		filters=[
+			["employee", "=", employee],
+			["docstatus", "=", 1],
+			["pending_amount", ">", 0],
+		],
+		fields=["name", "pending_amount"],
+		limit_page_length=5000,
+	)
+
+	return {
+		"employee": employee,
+		"balance": sum(flt(row.pending_amount) for row in rows),
+		"count": len(rows),
+	}
 
 
 class _BulkAccrualAdapter:

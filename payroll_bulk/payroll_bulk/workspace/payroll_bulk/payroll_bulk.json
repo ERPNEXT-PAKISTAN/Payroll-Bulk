@@ -2,7 +2,7 @@
  "app": "payroll_bulk",
  "charts": [],
  "content": "[{\"id\":\"pb_001\",\"type\":\"header\",\"data\":{\"text\":\"Payroll Bulk Workspace\",\"col\":12}},{\"id\":\"pb_002\",\"type\":\"paragraph\",\"data\":{\"text\":\"Manage bulk salary batches, employee review, payroll settings, and reports from one place.\",\"col\":12}},{\"id\":\"pb_003\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Bulk Salary Creation\",\"col\":3}},{\"id\":\"pb_004\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Rows\",\"col\":3}},{\"id\":\"pb_005\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Payroll Bulk Settings\",\"col\":3}},{\"id\":\"pb_006\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Batch Summary Report\",\"col\":3}},{\"id\":\"pb_007\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Detail Report\",\"col\":3}},{\"id\":\"pb_008\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"pb_009\",\"type\":\"header\",\"data\":{\"text\":\"Browse Links\",\"col\":12}},{\"id\":\"pb_010\",\"type\":\"card\",\"data\":{\"card_name\":\"Operations\",\"col\":4}},{\"id\":\"pb_011\",\"type\":\"card\",\"data\":{\"card_name\":\"Setup\",\"col\":4}},{\"id\":\"pb_012\",\"type\":\"card\",\"data\":{\"card_name\":\"Reports\",\"col\":4}}]",
- "creation": "2026-07-02 10:00:00",
+ "creation": "2026-07-02 15:06:58.070779",
  "custom_blocks": [],
  "docstatus": 0,
  "doctype": "Workspace",
@@ -13,6 +13,7 @@
  "indicator_color": "blue",
  "is_hidden": 0,
  "label": "Payroll Bulk",
+ "link_type": "DocType",
  "links": [
   {
    "hidden": 0,
@@ -94,7 +95,7 @@
    "type": "Link"
   }
  ],
- "modified": "2026-07-02 13:24:37.004637",
+ "modified": "2026-07-02 15:06:58.070779",
  "modified_by": "Administrator",
  "module": "Payroll Bulk",
  "name": "Payroll Bulk",
