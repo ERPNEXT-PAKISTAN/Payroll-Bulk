@@ -162,11 +162,27 @@ function bs_update_header_period(frm) {
 
 function bs_collapse_panel(target) {
   const $panel = $(`#${target}`);
-  const $toggle = $(`.bs-section-toggle[data-target="${target}"]`);
-  if (!$panel.length || $panel.hasClass("is-collapsed")) return;
+  if (!$panel.length) return;
   $panel.addClass("is-collapsed");
-  $toggle.addClass("is-collapsed");
-  $toggle.find(".bs-toggle-icon").text("+");
+}
+
+function bs_hide_filters() {
+  const $area = $("#bs-filters-area");
+  if (!$area.length) return;
+  $area.addClass("is-hidden");
+  $("#bs-toggle-filters-btn").text("☰ Filters");
+}
+
+function bs_focus_pending_editable() {
+  const next_index = window._bs.next_focus_index;
+  if (next_index == null) return;
+  window._bs.next_focus_index = null;
+  const items = [...document.querySelectorAll("#bs-table-container .bs-editable")];
+  const target = items[next_index];
+  if (target) {
+    target.focus();
+    if (typeof target.select === "function") target.select();
+  }
 }
 
 async function bs_apply_period_controls(frm) {
@@ -489,14 +505,10 @@ function render_main_ui(frm) {
         </div>
       </div>
 
-      <div id="bs-filters-area" class="bs-filters-area">
-      ${settings.enable_filter_fetch ? `
-      <!-- Filter fetch -->
-      <div class="bs-section-toggle is-collapsed" data-target="bs-fetch-panel">
-        <span>Fetch Employees by Filter <span class="bs-opt">(optional)</span></span>
-        <span class="bs-toggle-icon">+</span>
-      </div>
-      <div class="bs-panel bs-mb bs-collapsible is-collapsed" id="bs-fetch-panel">
+      <div id="bs-filters-area" class="bs-filters-area is-hidden">
+      <div class="bs-panel bs-mb" id="bs-filter-panel">
+        <div class="bs-filter-panel-title">Filters & Source</div>
+        ${settings.enable_filter_fetch ? `
         <div class="bs-qa-row">
           <div class="bs-field-wrap bs-floating-field" style="flex:1;min-width:150px">
             <span class="bs-field-caption">Department</span><div id="bs-dept-wrap"></div>
@@ -507,47 +519,23 @@ function render_main_ui(frm) {
           <div class="bs-field-wrap bs-floating-field" style="flex:1;min-width:150px">
             <span class="bs-field-caption">Designation</span><div id="bs-desig-wrap"></div>
           </div>
-          ${settings.enable_manual_add ? `
-          <div class="bs-field-wrap bs-floating-field" style="flex:1.15;min-width:180px">
-            <span class="bs-field-caption">Employee</span><div id="bs-emp-link-wrap"></div>
-          </div>` : ``}
           <div style="display:flex;align-items:flex-end">
             <button class="bs-btn-secondary" id="bs-fetch-btn">⬇ Fetch</button>
           </div>
+          ${settings.enable_manual_add ? `
+          <div class="bs-field-wrap bs-floating-field" style="flex:1.15;min-width:180px">
+            <span class="bs-field-caption">Employee</span><div id="bs-emp-link-wrap"></div>
+          </div>
+          ` : ``}
           ${settings.enable_manual_add ? `
           <div style="display:flex;align-items:flex-end">
             <button class="bs-btn-primary" id="bs-add-btn">＋ Add</button>
           </div>` : ``}
         </div>
+        ` : ``}
         <div id="bs-fetch-notice" style="display:none" class="bs-notice bs-notice-info"></div>
         <div id="bs-add-notice" style="display:none" class="bs-notice bs-notice-warn"></div>
-      </div>` : ``}
-
-      ${settings.enable_component_configuration ? `
-      <!-- Component mapping -->
-      <div class="bs-section-toggle is-collapsed" data-target="bs-component-panel">
-        <span>Component Configuration</span>
-        <span class="bs-toggle-icon">+</span>
-      </div>
-      <div class="bs-panel bs-mb bs-collapsible is-collapsed" id="bs-component-panel">
-        <div class="bs-config-note">
-          Map each custom amount to a Salary Component. Leave blank to auto-create default component names.
-        </div>
-        <div class="bs-config-grid">
-          <div class="bs-field-wrap"><label class="bs-label">Overtime Component</label><div id="bs-ot-component-wrap"></div></div>
-          <div class="bs-field-wrap"><label class="bs-label">Bonus Component</label><div id="bs-bonus-component-wrap"></div></div>
-          <div class="bs-field-wrap"><label class="bs-label">Allowance Component</label><div id="bs-allowance-component-wrap"></div></div>
-          <div class="bs-field-wrap"><label class="bs-label">Late Deduction Component</label><div id="bs-late-component-wrap"></div></div>
-          <div class="bs-field-wrap"><label class="bs-label">Other Deduction Component</label><div id="bs-deduction-component-wrap"></div></div>
-        </div>
-      </div>` : ``}
-
-      <div class="bs-section-toggle is-collapsed" data-target="bs-source-panel">
-        <span>Calculation Source</span>
-        <span class="bs-toggle-icon">+</span>
-      </div>
-      <div class="bs-panel bs-mb bs-collapsible is-collapsed" id="bs-source-panel">
-        <div class="bs-config-note">
+        <div class="bs-config-note" style="margin-top:8px">
           Select month first. It auto-fills period dates and stores the salary month in this Bulk Salary Creation entry.
         </div>
         <div class="bs-source-grid">
@@ -595,6 +583,16 @@ function render_main_ui(frm) {
           <button class="bs-btn-secondary" id="bs-load-source-btn" style="display:none">⭳ Load Source Data</button>
         </div>
       </div>
+      ${settings.enable_component_configuration ? `
+      <div class="bs-panel bs-mb" id="bs-component-panel" style="display:none">
+        <div class="bs-config-grid">
+          <div class="bs-field-wrap"><label class="bs-label">Overtime Component</label><div id="bs-ot-component-wrap"></div></div>
+          <div class="bs-field-wrap"><label class="bs-label">Bonus Component</label><div id="bs-bonus-component-wrap"></div></div>
+          <div class="bs-field-wrap"><label class="bs-label">Allowance Component</label><div id="bs-allowance-component-wrap"></div></div>
+          <div class="bs-field-wrap"><label class="bs-label">Late Deduction Component</label><div id="bs-late-component-wrap"></div></div>
+          <div class="bs-field-wrap"><label class="bs-label">Other Deduction Component</label><div id="bs-deduction-component-wrap"></div></div>
+        </div>
+      </div>` : ``}
       </div>
 
       <!-- Employee table -->
@@ -707,16 +705,7 @@ function render_main_ui(frm) {
   window._bs._sel  = { emp: "", name: "", dept: "", desig: "" };
 
   if (emp_ctrl) {
-    emp_ctrl.get_query = () => {
-      const filters = { status: "Active" };
-      const dept = dept_ctrl?.get_value?.() || "";
-      const branch = branch_ctrl?.get_value?.() || "";
-      const desig = desig_ctrl?.get_value?.() || "";
-      if (dept) filters.department = dept;
-      if (branch) filters.branch = branch;
-      if (desig) filters.designation = desig;
-      return { filters };
-    };
+    emp_ctrl.get_query = () => ({ filters: { status: "Active" } });
   }
 
   const bind_component_value = (ctrl, fieldname) => {
@@ -783,14 +772,6 @@ function render_main_ui(frm) {
   $wrap.find("#bs-head-frequency, #bs-head-start-date, #bs-head-end-date, #bs-head-posting-date").on("change", async function () {
     await bs_apply_period_controls(frm);
   });
-  $wrap.find(".bs-section-toggle").on("click", function () {
-    const target = $(this).data("target");
-    const $panel = $wrap.find(`#${target}`);
-    const collapsed = $panel.hasClass("is-collapsed");
-    $panel.toggleClass("is-collapsed", !collapsed);
-    $(this).toggleClass("is-collapsed", !collapsed);
-    $(this).find(".bs-toggle-icon").text(collapsed ? "−" : "+");
-  });
   $wrap.find("#bs-search-input").on("input", function () {
     window._bs.search_query = ($(this).val() || "").trim().toLowerCase();
     bs_render_table();
@@ -814,8 +795,7 @@ function render_main_ui(frm) {
     ) {
       return;
     }
-    $wrap.find("#bs-filters-area").addClass("is-hidden");
-    $wrap.find("#bs-toggle-filters-btn").text("☰ Filters");
+    bs_hide_filters();
   });
 
   if (window._bs.rows.length) {
@@ -862,7 +842,7 @@ function bs_fetch_employees() {
       if (added_rows.length) await bs_refresh_structure_assignments(added_rows);
       bs_render_table();
       notice(`✓ ${added} added${list.length-added ? ` (${list.length-added} already in list)`:""}.`, "success");
-      bs_collapse_panel("bs-fetch-panel");
+      bs_hide_filters();
     },
   });
 }
@@ -885,7 +865,7 @@ function bs_quick_add() {
     await bs_refresh_structure_assignments([row]);
     bs_render_table();
     notice(`✓ <b>${name||emp_id}</b> added.`, "success");
-    bs_collapse_panel("bs-fetch-panel");
+    bs_hide_filters();
     window._bs._sel = { emp:"", name:"", dept:"", desig:"", ctc:0 };
     emp_ctrl.set_value(""); emp_ctrl.$input.val("");
     setTimeout(() => emp_ctrl.$input.focus(), 80);
@@ -1012,35 +992,45 @@ function bs_render_table() {
     const adjustment_inputs = [];
     if (settings.enable_bonus) {
       adjustment_inputs.push(`
-        <label>Bonus
-          <input class="bs-input-sm" type="number" min="0" step="0.01"
-            value="${r.bonus_amount || 0}" onchange="bs_update_amount(${r._id},'bonus_amount',this.value)"/>
+        <label class="bs-adjust-item">
+          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
+            placeholder="Bonus" value="${bs_input_value(r.bonus_amount)}" onfocus="this.select()"
+            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'bonus_amount',this.value)"/>
         </label>`);
     }
     if (settings.enable_allowance) {
       adjustment_inputs.push(`
-        <label>Allowance
-          <input class="bs-input-sm" type="number" min="0" step="0.01"
-            value="${r.other_allowance || 0}" onchange="bs_update_amount(${r._id},'other_allowance',this.value)"/>
+        <label class="bs-adjust-item">
+          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
+            placeholder="Allowance" value="${bs_input_value(r.other_allowance)}" onfocus="this.select()"
+            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'other_allowance',this.value)"/>
         </label>`);
     }
     if (settings.enable_late_deduction) {
       adjustment_inputs.push(`
-        <label>Late Ded.
-          <input class="bs-input-sm" type="number" min="0" step="0.01"
-            value="${r.late_deduction || 0}" onchange="bs_update_amount(${r._id},'late_deduction',this.value)"/>
+        <label class="bs-adjust-item">
+          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
+            placeholder="Late Ded." value="${bs_input_value(r.late_deduction)}" onfocus="this.select()"
+            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'late_deduction',this.value)"/>
         </label>`);
     }
     if (settings.enable_other_deduction) {
       adjustment_inputs.push(`
-        <label>Other Ded.
-          <input class="bs-input-sm" type="number" min="0" step="0.01"
-            value="${r.other_deduction || 0}" onchange="bs_update_amount(${r._id},'other_deduction',this.value)"/>
+        <label class="bs-adjust-item">
+          <input class="bs-input-sm bs-editable bs-adjust-input" type="number" min="0" step="0.01" inputmode="decimal"
+            placeholder="Other Ded." value="${bs_input_value(r.other_deduction)}" onfocus="this.select()"
+            onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'other_deduction',this.value)"/>
         </label>`);
     }
     const adjustments_html = adjustment_inputs.length
-      ? `<div class="bs-adjust-grid">${adjustment_inputs.join("")}</div>`
-      : `<div style="font-size:12px;color:var(--bs-muted)">No adjustment fields enabled.</div>`;
+      ? `<div class="bs-adjust-grid bs-adjust-grid-row">${adjustment_inputs.join("")}</div>`
+      : `<div class="bs-source-inline bs-source-inline-adjust"><span>No earnings / deductions</span></div>`;
+    const adjustments_cell_html = adjustment_inputs.length
+      ? `<div class="bs-adjust-summary">
+          <span class="bs-adjust-summary-chip">Add ${fmt_num((r.bonus_amount || 0) + (r.other_allowance || 0))}</span>
+          <span class="bs-adjust-summary-chip">Ded ${fmt_num((r.late_deduction || 0) + (r.other_deduction || 0))}</span>
+        </div>`
+      : `<div class="bs-adjust-summary bs-adjust-summary-empty">—</div>`;
 
     const checkin_overtime_note = mode === "Checkin Based"
       ? `<div class="bs-source-inline">
@@ -1059,7 +1049,7 @@ function bs_render_table() {
         </div>`
       : "";
     const overtime_source_badge = `
-      <div class="bs-source-inline bs-source-inline-top">
+      <div class="bs-source-inline bs-source-inline-top bs-source-inline-tight">
         <span>Base ${mode}${bs_is_piece_mode(mode) ? ` • ${per_piece_basis}` : ""}</span>
         ${mode === "Attendance Based" ? `<span>OT Manual</span>` : ""}
         ${mode === "Checkin Based" ? `<span>OT Checkin Diff</span>` : ""}
@@ -1068,39 +1058,40 @@ function bs_render_table() {
 
     const work_input_html = bs_is_piece_mode(mode)
       ? `
-          <div class="bs-adjust-grid">
+          <div class="bs-ot-row bs-ot-row-piece">
             ${per_piece_basis === "Total Hours"
-              ? `<label>Hours
-                  <input class="bs-input-sm" type="number" min="0" step="0.01"
-                    value="${r.source_hours || 0}" onchange="bs_update_amount(${r._id},'source_hours',this.value)"/>
-                </label>`
-              : `<label>Qty
-                  <input class="bs-input-sm" type="number" min="0" step="0.01"
-                    value="${r.source_qty || 0}" onchange="bs_update_amount(${r._id},'source_qty',this.value)"/>
-                </label>
-                <label>Rate
-                  <input class="bs-input-sm" type="number" min="0" step="0.01"
-                    value="${r.piece_rate || 0}" onchange="bs_update_amount(${r._id},'piece_rate',this.value)"/>
-                </label>`}
+              ? `<input class="bs-input-sm bs-editable" type="number" min="0" step="0.01" inputmode="decimal"
+                    placeholder="Hours" value="${bs_input_value(r.source_hours)}" onfocus="this.select()"
+                    onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'source_hours',this.value)"/>`
+              : `<input class="bs-input-sm bs-editable" type="number" min="0" step="0.01" inputmode="decimal"
+                    placeholder="Qty" value="${bs_input_value(r.source_qty)}" onfocus="this.select()"
+                    onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'source_qty',this.value)"/>
+                 <input class="bs-input-sm bs-editable" type="number" min="0" step="0.01" inputmode="decimal"
+                    placeholder="Rate" value="${bs_input_value(r.piece_rate)}" onfocus="this.select()"
+                    onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'piece_rate',this.value)"/>
+                `}
+            <span class="bs-ot-amount">Base ${fmt_num(r.base_pay)}</span>
           </div>
-          <div style="font-size:11px;color:var(--bs-amber);margin-top:4px">
-            Base Amount: <b>${fmt_num(r.base_pay)}</b>
-          </div>`
+          `
       : `
           <div class="bs-ot-row">
-            <select class="bs-select-sm" onchange="bs_update_ot_type(${r._id},this.value)">
+            <select class="bs-select-sm bs-editable" onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_ot_type(${r._id},this.value)">
               <option value="hours" ${r.ot_type==="hours"?"selected":""}>Hours</option>
               <option value="days"  ${r.ot_type==="days" ?"selected":""}>Days</option>
             </select>
-            <input class="bs-input-sm" type="number" min="0" step="0.5"
-              value="${r.ot_input}" placeholder="0"
-              onchange="bs_update_ot(${r._id},this.value)"
-              oninput="bs_update_ot(${r._id},this.value)"/>
+            <input class="bs-input-sm bs-editable" type="number" min="0" step="0.5" inputmode="decimal"
+              value="${bs_input_value(r.ot_input)}" placeholder="Overtime" onfocus="this.select()"
+              onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_ot(${r._id},this.value)"/>
           </div>
-          <div style="font-size:11px;color:var(--bs-amber);margin-top:4px">
-            OT Amount: <b>${fmt_num(r.ot_amount)}</b>
-          </div>`;
-    const work_input_html_final = `${work_input_html}${overtime_source_badge}${attendance_note}${checkin_overtime_note}`;
+          <div class="bs-ot-amount-row"><span class="bs-ot-amount">OT ${fmt_num(r.ot_amount)}</span></div>
+          `;
+    const comp_detail_html = `
+      <div class="bs-source-inline bs-source-inline-plain">
+        <span>Daily ${fmt_num(r.ctc / 30, 3)}</span>
+        <span>Hourly ${fmt_num(hourly, 3)}</span>
+        <span>Basic ${fmt_num(r.base_pay || r.ctc)}</span>
+      </div>`;
+    const detail_html = [comp_detail_html, overtime_source_badge, attendance_note, checkin_overtime_note].filter(Boolean).join("");
     const structure_warning_html = r.structure_warning
       ? `<div class="bs-structure-warning">${frappe.utils.escape_html(r.structure_warning)}</div>`
       : "";
@@ -1114,36 +1105,30 @@ function bs_render_table() {
           <div class="bs-emp-code">${r.employee}</div>
           <div class="bs-emp-name">${r.employee_name!==r.employee?r.employee_name:""}</div>
           <div style="font-size:10px;color:var(--bs-muted)">${r.department||""}</div>
+          <div class="bs-row-actions bs-row-actions-compact">
+            <button class="bs-btn-remove-inline" onclick="bs_remove_row(${r._id})" title="Remove">Remove</button>
+          </div>
         </td>
         <td class="bs-td" style="min-width:90px">
           <div class="bs-ctc-val">${fmt_num(r.ctc)}</div>
-          <div style="font-size:10px;color:var(--bs-muted)">
-            Daily: ${fmt_num(r.ctc / 30,3)}
-          </div>
-          <div style="font-size:10px;color:var(--bs-muted)">
-            Hourly: ${fmt_num(hourly,3)}
-          </div>
-          <div style="font-size:10px;color:var(--bs-muted)">
-            Basic: ${fmt_num(r.base_pay || r.ctc)}
-          </div>
         </td>
-        <td class="bs-td" style="min-width:200px">${work_input_html_final}</td>
-        <td class="bs-td" style="min-width:220px">
-          ${adjustments_html}
+        <td class="bs-td bs-td-overtime" style="min-width:180px">${work_input_html}</td>
+        <td class="bs-td" style="min-width:110px">
+          ${adjustments_cell_html}
         </td>
         <td class="bs-td" style="min-width:130px">
-          <div style="font-size:13px;font-weight:700;color:var(--bs-cyan)">${fmt_num(r.gross)}</div>
-          <div style="font-size:10px;color:var(--bs-muted)">Add: ${fmt_num(r.total_additions)}</div>
+          <div class="bs-money-main bs-money-gross">${fmt_num(r.gross)}</div>
+          <div class="bs-money-sub">Add ${fmt_num(r.total_additions)}</div>
         </td>
         <td class="bs-td" style="min-width:220px">${adv_html}</td>
         <td class="bs-td" style="min-width:110px">
-          <div style="font-size:14px;font-weight:800;color:var(--bs-green)">${fmt_num(r.net)}</div>
-          <div style="font-size:10px;color:var(--bs-muted)">Ded: ${fmt_num(r.total_deductions)}</div>
+          <div class="bs-money-main bs-money-net">${fmt_num(r.net)}</div>
+          <div class="bs-money-sub">Ded ${fmt_num(r.total_deductions)}</div>
         </td>
         <td class="bs-td" style="min-width:170px">
           <div class="bs-structure-line">${r.salary_structure || "—"}</div>
-          <div class="bs-emp-name">${r.salary_structure_assignment || ""}</div>
-          <div class="bs-emp-name">Payable: ${r.payroll_payable_account || "—"}</div>
+          <div class="bs-emp-name bs-structure-meta">${r.salary_structure_assignment || ""}</div>
+          <div class="bs-emp-name bs-structure-meta">Payable ${r.payroll_payable_account || "—"}</div>
           ${structure_warning_html}
           <div class="bs-row-actions">${structure_action_html}</div>
         </td>
@@ -1152,8 +1137,15 @@ function bs_render_table() {
           ${status_html}
           ${action_html}
         </td>
-        <td class="bs-td" style="width:40px;text-align:center">
-          <button class="bs-btn-remove" onclick="bs_remove_row(${r._id})" title="Remove">✕</button>
+      </tr>
+      <tr class="bs-row-detail">
+        <td class="bs-td-detail" colspan="9">
+          <div class="bs-row-detail-wrap">${adjustments_html}</div>
+        </td>
+      </tr>
+      <tr class="bs-row-detail bs-row-detail-adjust">
+        <td class="bs-td-detail" colspan="9">
+          <div class="bs-row-detail-wrap">${detail_html}</div>
         </td>
       </tr>`;
   }).join("");
@@ -1164,16 +1156,16 @@ function bs_render_table() {
         <th class="bs-th bs-td-emp">Employee</th>
         <th class="bs-th">CTC / Month</th>
         <th class="bs-th">${bs_is_piece_mode(window._bs.frm?.doc?.calculation_mode || "Manual") ? "Per Piece / Hour" : "Overtime"}</th>
-        <th class="bs-th">Adjustments</th>
+        <th class="bs-th">Add / Ded</th>
         <th class="bs-th">Gross Pay</th>
         <th class="bs-th">Advances</th>
         <th class="bs-th">Net Pay</th>
         <th class="bs-th">Structure</th>
         <th class="bs-th">Slip / Status</th>
-        <th class="bs-th" style="width:40px"></th>
       </tr></thead>
       <tbody>${trs}</tbody>
     </table>`;
+  bs_focus_pending_editable();
 }
 
 function bs_match_row_filter(row, filter, query="") {
@@ -1206,6 +1198,15 @@ function bs_match_row_filter(row, filter, query="") {
 window.bs_remove_row = (id) => {
   window._bs.rows = window._bs.rows.filter((r) => r._id !== id);
   bs_render_table();
+};
+
+window.bs_handle_edit_keydown = (event, element) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  const items = [...document.querySelectorAll("#bs-table-container .bs-editable")];
+  const index = items.indexOf(element);
+  window._bs.next_focus_index = index >= 0 ? index + 1 : null;
+  if (typeof element.blur === "function") element.blur();
 };
 
 window.bs_update_ot_type = (id, val) => {
@@ -1576,7 +1577,7 @@ async function bs_load_source_data() {
         batch_name: frm.doc.name || "",
       });
     }
-    bs_collapse_panel("bs-source-panel");
+    bs_hide_filters();
     bs_render_table();
     frappe.show_alert({ message: "Source data loaded.", indicator: "green" }, 3);
   } catch (error) {
@@ -3082,6 +3083,11 @@ function fmt_num(n, dec=2) {
     {minimumFractionDigits:dec, maximumFractionDigits:dec});
 }
 
+function bs_input_value(value) {
+  const num = parseFloat(value || 0);
+  return num ? String(num) : "";
+}
+
 // ─── 19. STYLES ───────────────────────────────────────────────────────────────
 function inject_bs_styles() {
   if (document.getElementById("bs-styles")) return;
@@ -3125,29 +3131,30 @@ function inject_bs_styles() {
     .bs-header-sub{font-size:12.5px;color:var(--bs-muted);line-height:1.5}
     .bs-header-period-bar{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
     .bs-filters-area.is-hidden{display:none}
+    .bs-filter-panel-title{font-size:10px;font-weight:800;letter-spacing:.7px;text-transform:uppercase;color:#64748b;margin-bottom:8px}
 
     /* Layout */
     .bs-section-label{font-size:11px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#475569;margin-bottom:8px}
-    .bs-section-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;background:linear-gradient(180deg,#f7f4ff 0%,#efeafe 100%);border:1px solid #ddd6fe;color:#5b21b6;border-radius:10px;padding:8px 12px;margin-bottom:6px;font-size:11px;font-weight:800;cursor:pointer;box-shadow:0 6px 18px rgba(91,33,182,.06)}
-    .bs-section-toggle .bs-opt{color:#7c3aed}
-    .bs-section-toggle .bs-toggle-icon{font-size:16px;line-height:1}
     .bs-collapsible{overflow:hidden;transition:all .18s ease}
     .bs-collapsible.is-collapsed{display:none}
-    .bs-mb{margin-bottom:12px}
-    .bs-panel{overflow:visible;background:var(--bs-surface);border:1px solid var(--bs-border);border-radius:var(--bs-radius);padding:10px 12px;box-shadow:var(--bs-shadow)}
-    .bs-qa-row{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+    .bs-mb{margin-bottom:10px}
+    .bs-panel{overflow:visible;background:var(--bs-surface);border:1px solid var(--bs-border);border-radius:10px;padding:8px 10px;box-shadow:var(--bs-shadow)}
+    .bs-qa-row{display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap}
     .bs-config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
-    .bs-source-grid{display:flex;flex-direction:column;gap:8px}
-    .bs-source-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;align-items:end}
-    .bs-config-note{font-size:11px;color:var(--bs-muted);margin-bottom:8px}
+    .bs-source-grid{display:flex;flex-direction:column;gap:6px}
+    .bs-source-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;align-items:end}
+    .bs-config-note{font-size:10px;color:var(--bs-muted);margin-bottom:6px}
     .bs-search-filter-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 12px}
     .bs-search-row{flex:1;min-width:280px;margin:0}
-    .bs-search-input{width:100%;max-width:420px;background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:10px;padding:10px 12px;font-size:13px;box-shadow:var(--bs-shadow)}
+    .bs-search-input{width:100%;max-width:640px;background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:12px;padding:10px 14px;font-size:13px;box-shadow:var(--bs-shadow)}
     .bs-search-input:focus{outline:none;border-color:#a78bfa;box-shadow:0 0 0 3px rgba(167,139,250,.15)}
     .bs-source-metrics{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-    .bs-source-inline{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:4px;font-size:10px;color:#64748b;line-height:1.35}
-    .bs-source-inline span{display:inline-flex;align-items:center;padding:1px 6px;border-radius:999px;background:#f8fafc;border:1px solid #e2e8f0}
+    .bs-source-inline{display:flex;flex-wrap:wrap;gap:3px 5px;margin-top:3px;font-size:9.5px;color:#64748b;line-height:1.2}
+    .bs-source-inline span{display:inline-flex;align-items:center;padding:0 5px;border-radius:999px;background:#f8fafc;border:1px solid #e2e8f0}
     .bs-source-inline-top span{background:#f5f3ff;border-color:#ddd6fe;color:#6d28d9;font-weight:700}
+    .bs-source-inline-plain span{background:#fff;border-color:#dbe4f0;color:#64748b}
+    .bs-source-inline-adjust span{background:#fffbeb;border-color:#fde68a;color:#92400e}
+    .bs-source-inline-tight{margin-top:2px}
     .bs-source-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:700;border:1px solid transparent;line-height:1.5}
     .bs-source-chip-slate{background:#f1f5f9;color:#334155;border-color:#cbd5e1}
     .bs-source-chip-purple{background:#f3e8ff;color:#7c3aed;border-color:#d8b4fe}
@@ -3163,22 +3170,24 @@ function inject_bs_styles() {
     .bs-filter-btn:hover{background:#f5f3ff;border-color:#c4b5fd;color:#5b21b6}
     .bs-filter-btn.is-active{background:#ede9fe;border-color:#a78bfa;color:#5b21b6}
     .bs-field-wrap{display:flex;flex-direction:column;gap:2px}
-    .bs-floating-field{position:relative;min-height:40px}
+    .bs-floating-field{position:relative;min-height:34px}
     .bs-field-caption{display:none}
     .bs-label{font-size:11.5px;font-weight:700;color:#475569;user-select:none}
     .bs-select-full{width:100%}
 
     /* Buttons */
-    .bs-btn-primary{height:30px;padding:0 14px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:1px solid #1d4ed8;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;box-shadow:0 8px 18px rgba(37,99,235,.16)}
+    .bs-btn-primary{height:28px;padding:0 12px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:1px solid #1d4ed8;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;box-shadow:0 8px 18px rgba(37,99,235,.16)}
     .bs-btn-primary:hover{background:linear-gradient(135deg,#1d4ed8,#1e40af);border-color:#1e40af}
     .bs-btn-primary.bs-btn-lg{height:38px;padding:0 24px;font-size:14px}
-    .bs-btn-secondary{height:30px;padding:0 14px;background:#fff;color:var(--bs-text);border:1px solid var(--bs-border-strong);border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s}
+    .bs-btn-secondary{height:28px;padding:0 12px;background:#fff;color:var(--bs-text);border:1px solid var(--bs-border-strong);border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s}
     .bs-btn-secondary:hover{background:#f8fbff;border-color:#94a3b8}
     .bs-btn-ghost{background:#fff;border:1px solid var(--bs-border);color:#475569;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;transition:all .15s}
     .bs-btn-ghost:hover{border-color:#93c5fd;color:var(--bs-primary-deep);background:#eff6ff}
     .bs-btn-ghost.bs-btn-sm{padding:2px 8px;font-size:11px}
     .bs-btn-remove{background:#fff;border:1px solid #fecaca;color:var(--bs-red);border-radius:6px;width:26px;height:26px;font-size:11px;cursor:pointer;transition:background .15s}
     .bs-btn-remove:hover{background:var(--bs-red-dim)}
+    .bs-btn-remove-inline{background:#fff;border:1px solid #fecaca;color:var(--bs-red);border-radius:999px;padding:1px 8px;font-size:10px;font-weight:700;cursor:pointer}
+    .bs-btn-remove-inline:hover{background:var(--bs-red-dim)}
     .bs-action-bar{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--bs-border)}
 
     /* Notices */
@@ -3192,31 +3201,54 @@ function inject_bs_styles() {
     .bs-table-wrap{border:1px solid var(--bs-border);border-radius:var(--bs-radius);overflow:hidden;overflow-y:auto;margin-bottom:4px;background:var(--bs-surface);box-shadow:var(--bs-shadow)}
     .bs-table{width:100%;border-collapse:collapse;font-size:13px}
     .bs-th{background:linear-gradient(180deg,#f8fbff 0%,#eef4ff 100%);padding:10px 12px;text-align:left;font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:#475569;border-bottom:1px solid var(--bs-border)}
-    .bs-td{padding:9px 12px;border-bottom:1px solid #e9eef5;vertical-align:middle;background:#fff}
+    .bs-td{padding:7px 10px;border-bottom:1px solid #e9eef5;vertical-align:middle;background:#fff}
     .bs-row:last-child .bs-td{border-bottom:none}
     .bs-row:nth-child(even) .bs-td{background:#fbfdff}
     .bs-row:hover .bs-td{background:#f0f7ff}
+    .bs-row-detail .bs-td-detail{padding:3px 10px 5px;border-bottom:1px solid #e9eef5;background:#f8fafc}
+    .bs-row-detail-adjust .bs-td-detail{padding:1px 10px 5px;background:#fffdf7}
+    .bs-row-detail-wrap{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
     .bs-td-emp{min-width:160px}
     .bs-emp-code{font-weight:700;color:var(--bs-primary-deep);font-size:13px}
     .bs-emp-name{font-size:11px;color:var(--bs-muted);margin-top:1px}
     .bs-ctc-val{font-weight:700;color:var(--bs-text);font-size:13px}
     .bs-structure-line{font-size:12px;font-weight:700;color:var(--bs-cyan);line-height:1.4}
+    .bs-structure-meta{font-size:10px;line-height:1.2}
     .bs-structure-warning{margin-top:4px;padding:3px 8px;border-radius:999px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;font-size:10px;font-weight:700;display:inline-flex}
     .bs-status-stack{display:flex;flex-direction:column;gap:4px;margin-top:4px}
     .bs-status-sub{font-size:10px;color:var(--bs-muted)}
     .bs-row-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
-    .bs-adjust-grid{display:grid;grid-template-columns:repeat(2,minmax(88px,1fr));gap:6px}
-    .bs-adjust-grid label{display:flex;flex-direction:column;gap:3px;font-size:10px;color:#475569;font-weight:700}
+    .bs-row-actions-compact{margin-top:4px}
+    .bs-adjust-grid{display:grid;grid-template-columns:repeat(2,minmax(74px,1fr));gap:4px 8px}
+    .bs-adjust-grid-row{grid-template-columns:repeat(4,minmax(82px,max-content));gap:3px 8px;align-items:end}
+    .bs-adjust-grid label{display:flex;flex-direction:column;gap:2px;font-size:9.5px;color:#475569;font-weight:700;line-height:1}
+    .bs-adjust-grid label span{display:block}
+    .bs-adjust-item{display:block}
+    .bs-adjust-summary{display:flex;flex-direction:column;gap:4px}
+    .bs-adjust-summary-chip{display:inline-flex;align-items:center;justify-content:center;padding:1px 6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;font-size:9px;font-weight:700}
+    .bs-adjust-summary-empty{font-size:11px;color:var(--bs-muted)}
 
     /* OT inputs */
-    .bs-ot-row{display:flex;gap:6px;align-items:center}
-    .bs-select-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:8px;padding:6px 10px;font-size:12px;cursor:pointer;min-height:34px}
+    .bs-td-overtime{vertical-align:top}
+    .bs-ot-row{display:flex;gap:3px;align-items:center;flex-wrap:nowrap}
+    .bs-ot-row-piece .bs-input-sm{width:64px}
+    .bs-ot-amount-row{margin-top:2px}
+    .bs-ot-amount{display:inline-flex;align-items:center;white-space:nowrap;font-size:9px;font-weight:700;color:var(--bs-amber);background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:1px 6px;min-height:22px}
+    .bs-select-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:6px;padding:3px 6px;font-size:10.5px;cursor:pointer;min-height:26px}
     .bs-date-sm{min-width:132px}
-    .bs-floating-field .form-control{min-height:34px;padding-top:6px;padding-bottom:6px;border-radius:8px}
-    .bs-floating-field .control-input-wrapper input{min-height:34px;padding-top:6px;padding-bottom:6px;border-radius:8px}
-    .bs-floating-field .awesomplete input{min-height:34px;padding-top:6px;padding-bottom:6px;border-radius:8px}
-    .bs-input-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:6px;padding:4px 8px;font-size:12px;width:80px}
+    .bs-floating-field .form-control{min-height:30px;padding-top:5px;padding-bottom:5px;border-radius:8px}
+    .bs-floating-field .control-input-wrapper input{min-height:30px;padding-top:5px;padding-bottom:5px;border-radius:8px}
+    .bs-floating-field .awesomplete input{min-height:30px;padding-top:5px;padding-bottom:5px;border-radius:8px}
+    .bs-input-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:6px;padding:2px 6px;font-size:10px;width:56px;min-height:26px}
+    .bs-adjust-input{width:86px;height:26px;border-radius:6px;padding:2px 8px;text-align:left}
+    .bs-adjust-input::placeholder{color:#94a3b8;opacity:1;font-size:9.5px}
+    .bs-input-sm[type=number]::-webkit-outer-spin-button,.bs-input-sm[type=number]::-webkit-inner-spin-button,.bs-adv-input[type=number]::-webkit-outer-spin-button,.bs-adv-input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+    .bs-input-sm[type=number],.bs-adv-input[type=number]{-moz-appearance:textfield;appearance:textfield}
     .bs-input-sm:focus,.bs-select-sm:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+    .bs-money-main{font-size:13px;font-weight:800;line-height:1.1}
+    .bs-money-gross{color:var(--bs-cyan)}
+    .bs-money-net{color:var(--bs-green)}
+    .bs-money-sub{font-size:9.5px;color:var(--bs-muted);margin-top:2px}
 
     /* Advances */
     .bs-adv-wrap{display:flex;flex-direction:column;gap:5px}
@@ -3268,7 +3300,7 @@ function inject_bs_styles() {
 
     /* Payment bar */
     .bs-payment-bar{background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid var(--bs-border);border-radius:var(--bs-radius);padding:14px 18px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:6px;box-shadow:var(--bs-shadow)}
-    @media (max-width: 1200px){.bs-source-row{grid-template-columns:repeat(2,minmax(0,1fr));}.bs-header-card{align-items:flex-start;flex-direction:column}.bs-header-tools{width:100%;justify-content:space-between}.bs-header-period-bar{width:100%}}
+    @media (max-width: 1200px){.bs-source-row{grid-template-columns:repeat(3,minmax(0,1fr));}.bs-header-card{align-items:flex-start;flex-direction:column}.bs-header-tools{width:100%;justify-content:space-between}.bs-header-period-bar{width:100%}}
     @media (max-width: 768px){.bs-source-row{grid-template-columns:repeat(1,minmax(0,1fr));}}
   `;
   document.head.appendChild(s);
