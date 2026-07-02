@@ -3697,7 +3697,8 @@ function inject_bs_styles() {
     .bs-row:nth-child(even) .bs-td{background:#fbfdff}
     .bs-row:hover .bs-td{background:#f0f7ff}
     .bs-row-detail .bs-td-detail{padding:0 10px 1px;border-bottom:1px solid #e9eef5;background:#f8fafc}
-    .bs-row-detail-adjust .bs-td-detail{padding:0 10px 2px;background:#fffdf7}
+    .bs-row-detail-adjust .bs-td-detail{padding:0 10px 2px;background:linear-gradient(180deg,#fff7d6 0%,#ffeeba 100%);border-top:1px solid #fde68a;border-bottom:1px solid #fcd34d}
+    .bs-row-detail-adjust:nth-of-type(3n) .bs-td-detail{background:linear-gradient(180deg,#eef6ff 0%,#dbeafe 100%);border-top:1px solid #bfdbfe;border-bottom:1px solid #93c5fd}
     .bs-row-detail-wrap{display:flex;flex-wrap:wrap;gap:1px 4px;align-items:center}
     .bs-td-emp{min-width:160px}
     .bs-emp-code{font-weight:700;color:var(--bs-primary-deep);font-size:13px}
