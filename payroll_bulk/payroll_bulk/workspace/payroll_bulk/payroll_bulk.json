@@ -1,0 +1,159 @@
+{
+ "app": "payroll_bulk",
+ "charts": [],
+ "content": "[{\"id\":\"pb_001\",\"type\":\"header\",\"data\":{\"text\":\"Payroll Bulk Workspace\",\"col\":12}},{\"id\":\"pb_002\",\"type\":\"paragraph\",\"data\":{\"text\":\"Manage bulk salary batches, employee review, payroll settings, and reports from one place.\",\"col\":12}},{\"id\":\"pb_003\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Bulk Salary Creation\",\"col\":3}},{\"id\":\"pb_004\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Rows\",\"col\":3}},{\"id\":\"pb_005\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Payroll Bulk Settings\",\"col\":3}},{\"id\":\"pb_006\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Batch Summary Report\",\"col\":3}},{\"id\":\"pb_007\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Employee Detail Report\",\"col\":3}},{\"id\":\"pb_008\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"pb_009\",\"type\":\"header\",\"data\":{\"text\":\"Browse Links\",\"col\":12}},{\"id\":\"pb_010\",\"type\":\"card\",\"data\":{\"card_name\":\"Operations\",\"col\":4}},{\"id\":\"pb_011\",\"type\":\"card\",\"data\":{\"card_name\":\"Setup\",\"col\":4}},{\"id\":\"pb_012\",\"type\":\"card\",\"data\":{\"card_name\":\"Reports\",\"col\":4}}]",
+ "creation": "2026-07-02 10:00:00",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "octicon octicon-briefcase",
+ "idx": 0,
+ "indicator_color": "blue",
+ "is_hidden": 0,
+ "label": "Payroll Bulk",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Operations",
+   "link_count": 2,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Bulk Salary Creation",
+   "link_count": 0,
+   "link_to": "Bulk Salary Creation",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Bulk Salary Creation Employee",
+   "link_count": 0,
+   "link_to": "Bulk Salary Creation Employee",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Setup",
+   "link_count": 1,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Payroll Bulk Settings",
+   "link_count": 0,
+   "link_to": "Payroll Bulk Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Reports",
+   "link_count": 2,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Bulk Salary Creation Summary",
+   "link_count": 0,
+   "link_to": "Bulk Salary Creation Summary",
+   "link_type": "Report",
+   "onboard": 0,
+   "report_ref_doctype": "Bulk Salary Creation",
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Bulk Salary Employee Detail",
+   "link_count": 0,
+   "link_to": "Bulk Salary Employee Detail",
+   "link_type": "Report",
+   "onboard": 0,
+   "report_ref_doctype": "Bulk Salary Creation Employee",
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-07-02 13:24:37.004637",
+ "modified_by": "Administrator",
+ "module": "Payroll Bulk",
+ "name": "Payroll Bulk",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "HR Manager"
+  },
+  {
+   "role": "HR User"
+  }
+ ],
+ "sequence_id": 15.0,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "doc_view": "",
+   "label": "Bulk Salary Creation",
+   "link_to": "Bulk Salary Creation",
+   "type": "DocType"
+  },
+  {
+   "color": "Cyan",
+   "doc_view": "",
+   "label": "Employee Rows",
+   "link_to": "Bulk Salary Creation Employee",
+   "type": "DocType"
+  },
+  {
+   "color": "Orange",
+   "doc_view": "",
+   "label": "Payroll Bulk Settings",
+   "link_to": "Payroll Bulk Settings",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "",
+   "label": "Batch Summary Report",
+   "link_to": "Bulk Salary Creation Summary",
+   "report_ref_doctype": "Bulk Salary Creation",
+   "type": "Report"
+  },
+  {
+   "color": "Purple",
+   "doc_view": "",
+   "label": "Employee Detail Report",
+   "link_to": "Bulk Salary Employee Detail",
+   "report_ref_doctype": "Bulk Salary Creation Employee",
+   "type": "Report"
+  }
+ ],
+ "title": "Payroll Bulk",
+ "type": "Workspace"
+}
