@@ -49,14 +49,19 @@ async function bs_bootstrap_main_ui(frm) {
 
 function bs_default_settings() {
   return {
-    attendance_source: "Manual",
-    overtime_source: "Manual",
+    default_calculation_mode: "Manual",
+    default_per_piece_basis: "Total Hours",
     overtime_doctype: "",
     overtime_employee_field: "",
     overtime_date_field: "",
     overtime_hours_field: "",
     overtime_qty_field: "",
     overtime_rate_field: "",
+    show_department_filter: 1,
+    show_branch_filter: 1,
+    show_designation_filter: 1,
+    show_employee_filter: 1,
+    auto_hide_filters: 1,
     enable_bonus: 1,
     enable_allowance: 1,
     enable_late_deduction: 1,
@@ -68,7 +73,16 @@ function bs_default_settings() {
   };
 }
 
+function bs_auto_hide_filters_enabled() {
+  return bs_to_int(window._bs.settings?.auto_hide_filters, 1) === 1;
+}
+
 const BS_MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+function bs_to_int(value, fallback = 0) {
+  const num = parseInt(value ?? fallback, 10);
+  return Number.isNaN(num) ? fallback : num;
+}
 
 function bs_get_mode_attendance_source(mode) {
   if (mode === "Attendance Based") return "Attendance";
@@ -113,10 +127,10 @@ async function bs_get_settings() {
 }
 
 function bs_apply_source_defaults(frm, settings) {
-  frm.doc.calculation_mode = frm.doc.calculation_mode || "Manual";
+  frm.doc.calculation_mode = frm.doc.calculation_mode || settings.default_calculation_mode || "Manual";
   frm.doc.attendance_source = bs_get_mode_attendance_source(frm.doc.calculation_mode);
-  frm.doc.overtime_source = frm.doc.overtime_source || settings.overtime_source || "Manual";
-  frm.doc.per_piece_basis = frm.doc.per_piece_basis || "Total Hours";
+  frm.doc.overtime_source = frm.doc.overtime_source || "Manual";
+  frm.doc.per_piece_basis = frm.doc.per_piece_basis || settings.default_per_piece_basis || "Total Hours";
   frm.doc.overtime_doctype = frm.doc.overtime_doctype || settings.overtime_doctype || "";
   frm.doc.overtime_employee_field = frm.doc.overtime_employee_field || settings.overtime_employee_field || "";
   frm.doc.overtime_date_field = frm.doc.overtime_date_field || settings.overtime_date_field || "";
@@ -171,6 +185,18 @@ function bs_hide_filters() {
   if (!$area.length) return;
   $area.addClass("is-hidden");
   $("#bs-toggle-filters-btn").text("☰ Filters");
+}
+
+function bs_normalize_rows() {
+  const seen = new Set();
+  window._bs.rows = (window._bs.rows || []).filter((row) => {
+    if (!row || !String(row.employee || "").trim()) return false;
+    const employee = String(row.employee || "").trim();
+    if (seen.has(employee)) return false;
+    seen.add(employee);
+    row.employee = employee;
+    return true;
+  });
 }
 
 function bs_focus_pending_editable() {
@@ -413,10 +439,14 @@ function render_main_ui(frm) {
   const settings = window._bs.settings || bs_default_settings();
   settings.enable_component_configuration = 0;
   bs_apply_source_defaults(frm, settings);
+  const show_fetch_filters = !!(settings.enable_filter_fetch && (bs_to_int(settings.show_department_filter, 1) || bs_to_int(settings.show_branch_filter, 1) || bs_to_int(settings.show_designation_filter, 1)));
+  const show_manual_employee = !!(settings.enable_manual_add && bs_to_int(settings.show_employee_filter, 1));
+  const show_filter_row = show_fetch_filters || show_manual_employee;
 
   // Restore from saved draft
   if (frm.doc.employees && frm.doc.employees.length) {
     frm.doc.employees.forEach((r) => {
+      if (!r.employee) return;
       window._bs.rows.push({
         _id:            ++window._bs.counter,
         row_name:       r.name || "",
@@ -466,6 +496,7 @@ function render_main_ui(frm) {
       recalc_row(window._bs.rows[window._bs.rows.length - 1]);
     });
   }
+  bs_normalize_rows();
 
   const $body = frm.layout.wrapper.find(".form-page");
   $body.find("#bs-main-wrap").remove();
@@ -508,26 +539,34 @@ function render_main_ui(frm) {
       <div id="bs-filters-area" class="bs-filters-area is-hidden">
       <div class="bs-panel bs-mb" id="bs-filter-panel">
         <div class="bs-filter-panel-title">Filters & Source</div>
-        ${settings.enable_filter_fetch ? `
+        ${show_filter_row ? `
         <div class="bs-qa-row">
+          ${bs_to_int(settings.show_department_filter, 1) ? `
           <div class="bs-field-wrap bs-floating-field" style="flex:1;min-width:150px">
             <span class="bs-field-caption">Department</span><div id="bs-dept-wrap"></div>
           </div>
+          ` : ``}
+          ${bs_to_int(settings.show_branch_filter, 1) ? `
           <div class="bs-field-wrap bs-floating-field" style="flex:1;min-width:150px">
             <span class="bs-field-caption">Branch</span><div id="bs-branch-wrap"></div>
           </div>
+          ` : ``}
+          ${bs_to_int(settings.show_designation_filter, 1) ? `
           <div class="bs-field-wrap bs-floating-field" style="flex:1;min-width:150px">
             <span class="bs-field-caption">Designation</span><div id="bs-desig-wrap"></div>
           </div>
+          ` : ``}
+          ${show_fetch_filters ? `
           <div style="display:flex;align-items:flex-end">
             <button class="bs-btn-secondary" id="bs-fetch-btn">⬇ Fetch</button>
           </div>
-          ${settings.enable_manual_add ? `
+          ` : ``}
+          ${show_manual_employee ? `
           <div class="bs-field-wrap bs-floating-field" style="flex:1.15;min-width:180px">
             <span class="bs-field-caption">Employee</span><div id="bs-emp-link-wrap"></div>
           </div>
           ` : ``}
-          ${settings.enable_manual_add ? `
+          ${show_manual_employee ? `
           <div style="display:flex;align-items:flex-end">
             <button class="bs-btn-primary" id="bs-add-btn">＋ Add</button>
           </div>` : ``}
@@ -681,10 +720,10 @@ function render_main_ui(frm) {
     return ctrl;
   };
 
-  const dept_ctrl   = settings.enable_filter_fetch ? make_link("#bs-dept-wrap",   "bs_dept",   "Department",  "Department") : null;
-  const branch_ctrl = settings.enable_filter_fetch ? make_link("#bs-branch-wrap",  "bs_branch", "Branch",      "Branch") : null;
-  const desig_ctrl  = settings.enable_filter_fetch ? make_link("#bs-desig-wrap",   "bs_desig",  "Designation", "Designation") : null;
-  const emp_ctrl    = settings.enable_manual_add ? make_link("#bs-emp-link-wrap", "bs_emp",    "Employee",    "Employee") : null;
+  const dept_ctrl   = settings.enable_filter_fetch && bs_to_int(settings.show_department_filter, 1) ? make_link("#bs-dept-wrap",   "bs_dept",   "Department",  "Department") : null;
+  const branch_ctrl = settings.enable_filter_fetch && bs_to_int(settings.show_branch_filter, 1) ? make_link("#bs-branch-wrap",  "bs_branch", "Branch",      "Branch") : null;
+  const desig_ctrl  = settings.enable_filter_fetch && bs_to_int(settings.show_designation_filter, 1) ? make_link("#bs-desig-wrap",   "bs_desig",  "Designation", "Designation") : null;
+  const emp_ctrl    = settings.enable_manual_add && bs_to_int(settings.show_employee_filter, 1) ? make_link("#bs-emp-link-wrap", "bs_emp",    "Employee",    "Employee") : null;
   const overtime_component_ctrl  = settings.enable_component_configuration ? make_link("#bs-ot-component-wrap", "bs_overtime_component", "Salary Component", "Auto: Bulk Overtime") : null;
   const bonus_component_ctrl     = settings.enable_component_configuration ? make_link("#bs-bonus-component-wrap", "bs_bonus_component", "Salary Component", "Auto: Bulk Bonus") : null;
   const allowance_component_ctrl = settings.enable_component_configuration ? make_link("#bs-allowance-component-wrap", "bs_allowance_component", "Salary Component", "Auto: Bulk Allowance") : null;
@@ -743,9 +782,9 @@ function render_main_ui(frm) {
   });
 
   // ── Events ───────────────────────────────────────────────────────────────
-  settings.enable_filter_fetch && $wrap.find("#bs-fetch-btn").on("click",          () => bs_fetch_employees());
-  settings.enable_manual_add && $wrap.find("#bs-add-btn").on("click", () => bs_quick_add());
-  settings.enable_manual_add && $wrap.find("#bs-emp-link-wrap input").on("keydown", (e) => { if (e.key==="Enter") bs_quick_add(); });
+  (dept_ctrl || branch_ctrl || desig_ctrl) && $wrap.find("#bs-fetch-btn").on("click", () => bs_fetch_employees());
+  emp_ctrl && $wrap.find("#bs-add-btn").on("click", () => bs_quick_add());
+  emp_ctrl && $wrap.find("#bs-emp-link-wrap input").on("keydown", (e) => { if (e.key==="Enter") bs_quick_add(); });
   $wrap.find("#bs-refresh-all-btn").on("click",    () => bs_refresh_all_statuses());
   $wrap.find("#bs-open-submitted-btn").on("click", () => bs_open_submitted_slips());
   $wrap.find("#bs-create-accrual-btn").on("click", () => bs_create_accrual_journal_entry());
@@ -795,7 +834,7 @@ function render_main_ui(frm) {
     ) {
       return;
     }
-    bs_hide_filters();
+    if (bs_auto_hide_filters_enabled()) bs_hide_filters();
   });
 
   if (window._bs.rows.length) {
@@ -809,10 +848,9 @@ function render_main_ui(frm) {
 // ─── 4. FETCH EMPLOYEES BY FILTER ─────────────────────────────────────────────
 function bs_fetch_employees() {
   const { dept_ctrl, branch_ctrl, desig_ctrl } = window._bs.ctrls;
-  if (!dept_ctrl || !branch_ctrl || !desig_ctrl) return;
-  const dept   = dept_ctrl.get_value()   || "";
-  const branch = branch_ctrl.get_value() || "";
-  const desig  = desig_ctrl.get_value()  || "";
+  const dept   = dept_ctrl?.get_value?.()   || "";
+  const branch = branch_ctrl?.get_value?.() || "";
+  const desig  = desig_ctrl?.get_value?.()  || "";
 
   const notice = (msg, type="info") => bs_notice("bs-fetch-notice", msg, type);
   notice("⏳ Fetching…");
@@ -827,6 +865,7 @@ function bs_fetch_employees() {
     args: { doctype:"Employee", filters, limit:500,
             fields:["name","employee_name","department","designation","ctc"] },
     async callback(r) {
+      bs_normalize_rows();
       const list = r.message || [];
       if (!list.length) { notice("⚠ No active employees found.", "warn"); return; }
       const added_rows = [];
@@ -840,9 +879,10 @@ function bs_fetch_employees() {
         }
       });
       if (added_rows.length) await bs_refresh_structure_assignments(added_rows);
+      bs_normalize_rows();
       bs_render_table();
       notice(`✓ ${added} added${list.length-added ? ` (${list.length-added} already in list)`:""}.`, "success");
-      bs_hide_filters();
+      if (bs_auto_hide_filters_enabled()) bs_hide_filters();
     },
   });
 }
@@ -862,10 +902,11 @@ function bs_quick_add() {
   const do_add = async (name, dept, desig, ctc) => {
     const row = make_row(emp_id, name, dept, desig, parseFloat(ctc||0));
     window._bs.rows.push(row);
+    bs_normalize_rows();
     await bs_refresh_structure_assignments([row]);
     bs_render_table();
     notice(`✓ <b>${name||emp_id}</b> added.`, "success");
-    bs_hide_filters();
+    if (bs_auto_hide_filters_enabled()) bs_hide_filters();
     window._bs._sel = { emp:"", name:"", dept:"", desig:"", ctc:0 };
     emp_ctrl.set_value(""); emp_ctrl.$input.val("");
     setTimeout(() => emp_ctrl.$input.focus(), 80);
@@ -912,6 +953,7 @@ function make_row(employee, employee_name, department, designation, ctc) {
 
 // ─── 6. RENDER TABLE ──────────────────────────────────────────────────────────
 function bs_render_table() {
+  bs_normalize_rows();
   const container = document.getElementById("bs-table-container");
   if (!container) return;
   const rows = window._bs.rows;
@@ -1154,7 +1196,7 @@ function bs_render_table() {
     <table class="bs-table">
       <thead><tr>
         <th class="bs-th bs-td-emp">Employee</th>
-        <th class="bs-th">CTC / Month</th>
+        <th class="bs-th">Basic Salary</th>
         <th class="bs-th">${bs_is_piece_mode(window._bs.frm?.doc?.calculation_mode || "Manual") ? "Per Piece / Hour" : "Overtime"}</th>
         <th class="bs-th">Add / Ded</th>
         <th class="bs-th">Gross Pay</th>
@@ -1577,7 +1619,7 @@ async function bs_load_source_data() {
         batch_name: frm.doc.name || "",
       });
     }
-    bs_hide_filters();
+    if (bs_auto_hide_filters_enabled()) bs_hide_filters();
     bs_render_table();
     frappe.show_alert({ message: "Source data loaded.", indicator: "green" }, 3);
   } catch (error) {
@@ -1605,6 +1647,7 @@ async function bs_save_draft() {
 }
 
 function bs_sync_to_frm(frm) {
+  bs_normalize_rows();
   if (window._bs.ctrls) {
     frm.doc.overtime_component = window._bs.ctrls.overtime_component_ctrl?.get_value() || frm.doc.overtime_component || "";
     frm.doc.bonus_component = window._bs.ctrls.bonus_component_ctrl?.get_value() || frm.doc.bonus_component || "";
@@ -1615,6 +1658,7 @@ function bs_sync_to_frm(frm) {
   bs_sync_source_doc(frm);
   frm.doc.employees = [];
   window._bs.rows.forEach((row) => {
+    if (!row.employee) return;
     const c = frappe.model.add_child(frm.doc, "Bulk Salary Creation Employee", "employees");
     if (row.row_name) c.name = row.row_name;
     c.employee        = row.employee;
@@ -3138,15 +3182,15 @@ function inject_bs_styles() {
     .bs-collapsible{overflow:hidden;transition:all .18s ease}
     .bs-collapsible.is-collapsed{display:none}
     .bs-mb{margin-bottom:10px}
-    .bs-panel{overflow:visible;background:var(--bs-surface);border:1px solid var(--bs-border);border-radius:10px;padding:8px 10px;box-shadow:var(--bs-shadow)}
-    .bs-qa-row{display:flex;align-items:flex-end;gap:6px;flex-wrap:wrap}
+    .bs-panel{overflow:visible;background:var(--bs-surface);border:1px solid var(--bs-border);border-radius:10px;padding:6px 8px;box-shadow:var(--bs-shadow)}
+    .bs-qa-row{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;align-items:end}
     .bs-config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
-    .bs-source-grid{display:flex;flex-direction:column;gap:6px}
-    .bs-source-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;align-items:end}
-    .bs-config-note{font-size:10px;color:var(--bs-muted);margin-bottom:6px}
-    .bs-search-filter-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 12px}
+    .bs-source-grid{display:flex;flex-direction:column;gap:4px}
+    .bs-source-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;align-items:end}
+    .bs-config-note{font-size:9.5px;color:var(--bs-muted);margin:4px 0}
+    .bs-search-filter-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
     .bs-search-row{flex:1;min-width:280px;margin:0}
-    .bs-search-input{width:100%;max-width:640px;background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:12px;padding:10px 14px;font-size:13px;box-shadow:var(--bs-shadow)}
+    .bs-search-input{width:100%;max-width:640px;background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:8px;padding:8px 12px;font-size:12px;box-shadow:none}
     .bs-search-input:focus{outline:none;border-color:#a78bfa;box-shadow:0 0 0 3px rgba(167,139,250,.15)}
     .bs-source-metrics{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
     .bs-source-inline{display:flex;flex-wrap:wrap;gap:3px 5px;margin-top:3px;font-size:9.5px;color:#64748b;line-height:1.2}
@@ -3165,21 +3209,21 @@ function inject_bs_styles() {
     .bs-source-chip-cyan{background:#cffafe;color:#155e75;border-color:#67e8f9}
     .bs-source-chip-violet{background:#ede9fe;color:#5b21b6;border-color:#c4b5fd}
     .bs-source-chip-amber{background:#fef3c7;color:#b45309;border-color:#fcd34d}
-    .bs-filter-bar{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin:0}
-    .bs-filter-btn{background:#fff;border:1px solid #ddd6fe;color:#6d28d9;border-radius:999px;padding:5px 12px;font-size:11.5px;font-weight:700;cursor:pointer;transition:all .15s}
+    .bs-filter-bar{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;margin:0}
+    .bs-filter-btn{background:#fff;border:1px solid #ddd6fe;color:#6d28d9;border-radius:999px;padding:4px 10px;font-size:10.5px;font-weight:700;cursor:pointer;transition:all .15s}
     .bs-filter-btn:hover{background:#f5f3ff;border-color:#c4b5fd;color:#5b21b6}
     .bs-filter-btn.is-active{background:#ede9fe;border-color:#a78bfa;color:#5b21b6}
-    .bs-field-wrap{display:flex;flex-direction:column;gap:2px}
-    .bs-floating-field{position:relative;min-height:34px}
+    .bs-field-wrap{display:flex;flex-direction:column;gap:1px}
+    .bs-floating-field{position:relative;min-height:28px}
     .bs-field-caption{display:none}
     .bs-label{font-size:11.5px;font-weight:700;color:#475569;user-select:none}
     .bs-select-full{width:100%}
 
     /* Buttons */
-    .bs-btn-primary{height:28px;padding:0 12px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:1px solid #1d4ed8;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;box-shadow:0 8px 18px rgba(37,99,235,.16)}
+    .bs-btn-primary{height:26px;padding:0 12px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:1px solid #1d4ed8;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;box-shadow:0 8px 18px rgba(37,99,235,.16)}
     .bs-btn-primary:hover{background:linear-gradient(135deg,#1d4ed8,#1e40af);border-color:#1e40af}
     .bs-btn-primary.bs-btn-lg{height:38px;padding:0 24px;font-size:14px}
-    .bs-btn-secondary{height:28px;padding:0 12px;background:#fff;color:var(--bs-text);border:1px solid var(--bs-border-strong);border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s}
+    .bs-btn-secondary{height:26px;padding:0 10px;background:#fff;color:var(--bs-text);border:1px solid var(--bs-border-strong);border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s}
     .bs-btn-secondary:hover{background:#f8fbff;border-color:#94a3b8}
     .bs-btn-ghost{background:#fff;border:1px solid var(--bs-border);color:#475569;border-radius:6px;padding:3px 10px;font-size:12px;cursor:pointer;transition:all .15s}
     .bs-btn-ghost:hover{border-color:#93c5fd;color:var(--bs-primary-deep);background:#eff6ff}
@@ -3205,9 +3249,9 @@ function inject_bs_styles() {
     .bs-row:last-child .bs-td{border-bottom:none}
     .bs-row:nth-child(even) .bs-td{background:#fbfdff}
     .bs-row:hover .bs-td{background:#f0f7ff}
-    .bs-row-detail .bs-td-detail{padding:3px 10px 5px;border-bottom:1px solid #e9eef5;background:#f8fafc}
-    .bs-row-detail-adjust .bs-td-detail{padding:1px 10px 5px;background:#fffdf7}
-    .bs-row-detail-wrap{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+    .bs-row-detail .bs-td-detail{padding:2px 10px 4px;border-bottom:1px solid #e9eef5;background:#f8fafc}
+    .bs-row-detail-adjust .bs-td-detail{padding:1px 10px 4px;background:#fffdf7}
+    .bs-row-detail-wrap{display:flex;flex-wrap:wrap;gap:3px 6px;align-items:center}
     .bs-td-emp{min-width:160px}
     .bs-emp-code{font-weight:700;color:var(--bs-primary-deep);font-size:13px}
     .bs-emp-name{font-size:11px;color:var(--bs-muted);margin-top:1px}
@@ -3220,7 +3264,7 @@ function inject_bs_styles() {
     .bs-row-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
     .bs-row-actions-compact{margin-top:4px}
     .bs-adjust-grid{display:grid;grid-template-columns:repeat(2,minmax(74px,1fr));gap:4px 8px}
-    .bs-adjust-grid-row{grid-template-columns:repeat(4,minmax(82px,max-content));gap:3px 8px;align-items:end}
+    .bs-adjust-grid-row{grid-template-columns:repeat(4,minmax(86px,1fr));gap:2px 6px;align-items:end}
     .bs-adjust-grid label{display:flex;flex-direction:column;gap:2px;font-size:9.5px;color:#475569;font-weight:700;line-height:1}
     .bs-adjust-grid label span{display:block}
     .bs-adjust-item{display:block}
@@ -3234,14 +3278,14 @@ function inject_bs_styles() {
     .bs-ot-row-piece .bs-input-sm{width:64px}
     .bs-ot-amount-row{margin-top:2px}
     .bs-ot-amount{display:inline-flex;align-items:center;white-space:nowrap;font-size:9px;font-weight:700;color:var(--bs-amber);background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:1px 6px;min-height:22px}
-    .bs-select-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:6px;padding:3px 6px;font-size:10.5px;cursor:pointer;min-height:26px}
+    .bs-select-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:4px;padding:2px 6px;font-size:10px;cursor:pointer;min-height:24px}
     .bs-date-sm{min-width:132px}
-    .bs-floating-field .form-control{min-height:30px;padding-top:5px;padding-bottom:5px;border-radius:8px}
-    .bs-floating-field .control-input-wrapper input{min-height:30px;padding-top:5px;padding-bottom:5px;border-radius:8px}
-    .bs-floating-field .awesomplete input{min-height:30px;padding-top:5px;padding-bottom:5px;border-radius:8px}
-    .bs-input-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:6px;padding:2px 6px;font-size:10px;width:56px;min-height:26px}
-    .bs-adjust-input{width:86px;height:26px;border-radius:6px;padding:2px 8px;text-align:left}
-    .bs-adjust-input::placeholder{color:#94a3b8;opacity:1;font-size:9.5px}
+    .bs-floating-field .form-control{min-height:24px;height:24px;padding:2px 7px;border-radius:4px;font-size:10px}
+    .bs-floating-field .control-input-wrapper input{min-height:24px;height:24px;padding:2px 7px;border-radius:4px;font-size:10px}
+    .bs-floating-field .awesomplete input{min-height:24px;height:24px;padding:2px 7px;border-radius:4px;font-size:10px}
+    .bs-input-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:4px;padding:2px 6px;font-size:10px;width:56px;min-height:24px}
+    .bs-adjust-input{width:100%;height:24px;border-radius:4px;padding:2px 8px;text-align:left}
+    .bs-adjust-input::placeholder{color:#64748b;opacity:1;font-size:9px}
     .bs-input-sm[type=number]::-webkit-outer-spin-button,.bs-input-sm[type=number]::-webkit-inner-spin-button,.bs-adv-input[type=number]::-webkit-outer-spin-button,.bs-adv-input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
     .bs-input-sm[type=number],.bs-adv-input[type=number]{-moz-appearance:textfield;appearance:textfield}
     .bs-input-sm:focus,.bs-select-sm:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
@@ -3300,8 +3344,9 @@ function inject_bs_styles() {
 
     /* Payment bar */
     .bs-payment-bar{background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid var(--bs-border);border-radius:var(--bs-radius);padding:14px 18px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:6px;box-shadow:var(--bs-shadow)}
-    @media (max-width: 1200px){.bs-source-row{grid-template-columns:repeat(3,minmax(0,1fr));}.bs-header-card{align-items:flex-start;flex-direction:column}.bs-header-tools{width:100%;justify-content:space-between}.bs-header-period-bar{width:100%}}
-    @media (max-width: 768px){.bs-source-row{grid-template-columns:repeat(1,minmax(0,1fr));}}
+    @media (max-width: 1280px){.bs-qa-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-source-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-header-card{align-items:flex-start;flex-direction:column}.bs-header-tools{width:100%;justify-content:space-between}.bs-header-period-bar{width:100%}}
+    @media (max-width: 900px){.bs-qa-row,.bs-source-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media (max-width: 768px){.bs-source-row,.bs-qa-row{grid-template-columns:repeat(1,minmax(0,1fr))}}
   `;
   document.head.appendChild(s);
 }

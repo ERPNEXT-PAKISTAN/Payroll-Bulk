@@ -922,7 +922,7 @@
       "fieldname": "calculation_mode",
       "fieldtype": "Select",
       "label": "Calculation Mode",
-      "options": "Manual\nAttendance Based\nCheckin Based\nPer Piece Qty",
+      "options": "Manual\nAttendance Based\nCheckin Based\nPer Piece or Per Hour",
       "default": "Manual",
       "allow_on_submit": 1
     },
@@ -954,7 +954,7 @@
       "options": "Total Hours\nTotal Qty",
       "default": "Total Hours",
       "allow_on_submit": 1,
-      "depends_on": "eval:doc.calculation_mode=='Per Piece Qty'"
+      "depends_on": "eval:doc.calculation_mode=='Per Piece or Per Hour'"
     },
     {
       "fieldname": "column_break_source_b",
@@ -972,35 +972,35 @@
       "fieldtype": "Data",
       "label": "Overtime Employee Field",
       "allow_on_submit": 1,
-      "depends_on": "eval:doc.overtime_source=='Custom DocType' || doc.calculation_mode=='Per Piece Qty'"
+      "depends_on": "eval:doc.overtime_source=='Custom DocType' || doc.calculation_mode=='Per Piece or Per Hour'"
     },
     {
       "fieldname": "overtime_date_field",
       "fieldtype": "Data",
       "label": "Overtime Date Field",
       "allow_on_submit": 1,
-      "depends_on": "eval:doc.overtime_source=='Custom DocType' || doc.calculation_mode=='Per Piece Qty'"
+      "depends_on": "eval:doc.overtime_source=='Custom DocType' || doc.calculation_mode=='Per Piece or Per Hour'"
     },
     {
       "fieldname": "overtime_hours_field",
       "fieldtype": "Data",
       "label": "Overtime Hours Field",
       "allow_on_submit": 1,
-      "depends_on": "eval:doc.overtime_source=='Custom DocType' || doc.calculation_mode=='Per Piece Qty'"
+      "depends_on": "eval:doc.overtime_source=='Custom DocType' || doc.calculation_mode=='Per Piece or Per Hour'"
     },
     {
       "fieldname": "overtime_qty_field",
       "fieldtype": "Data",
       "label": "Overtime Qty Field",
       "allow_on_submit": 1,
-      "depends_on": "eval:doc.calculation_mode=='Per Piece Qty'"
+      "depends_on": "eval:doc.calculation_mode=='Per Piece or Per Hour'"
     },
     {
       "fieldname": "overtime_rate_field",
       "fieldtype": "Data",
       "label": "Overtime Rate Field",
       "allow_on_submit": 1,
-      "depends_on": "eval:doc.calculation_mode=='Per Piece Qty'"
+      "depends_on": "eval:doc.calculation_mode=='Per Piece or Per Hour'"
     },
     {
       "allow_bulk_edit": 0,

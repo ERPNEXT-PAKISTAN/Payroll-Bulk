@@ -4,25 +4,31 @@
   "doctype": "DocType",
   "engine": "InnoDB",
   "field_order": [
-    "enable_allowance",
-    "enable_bonus",
-    "enable_other_deduction",
-    "enable_late_deduction",
-    "column_break_jkql",
+    "company",
+    "section_break_filters",
     "enable_filter_fetch",
+    "show_department_filter",
+    "show_branch_filter",
+    "show_designation_filter",
+    "column_break_filters",
+    "show_employee_filter",
     "enable_manual_add",
-    "enable_component_configuration",
+    "auto_hide_filters",
     "default_submit_slips",
-    "attendance_source",
-    "overtime_source",
+    "section_break_components",
+    "enable_bonus",
+    "enable_allowance",
+    "enable_late_deduction",
+    "enable_other_deduction",
+    "section_break_source_defaults",
+    "default_calculation_mode",
+    "default_per_piece_basis",
     "overtime_doctype",
     "overtime_employee_field",
     "overtime_date_field",
     "overtime_hours_field",
     "overtime_qty_field",
-    "overtime_rate_field",
-    "column_break_opla",
-    "company"
+    "overtime_rate_field"
   ],
   "fields": [
     {
@@ -30,6 +36,68 @@
       "fieldtype": "Link",
       "label": "Company",
       "options": "Company"
+    },
+    {
+      "fieldname": "section_break_filters",
+      "fieldtype": "Section Break",
+      "label": "Filter Visibility"
+    },
+    {
+      "default": "1",
+      "fieldname": "enable_filter_fetch",
+      "fieldtype": "Check",
+      "label": "Enable Employee Filters"
+    },
+    {
+      "default": "1",
+      "fieldname": "show_department_filter",
+      "fieldtype": "Check",
+      "label": "Show Department Filter"
+    },
+    {
+      "default": "1",
+      "fieldname": "show_branch_filter",
+      "fieldtype": "Check",
+      "label": "Show Branch Filter"
+    },
+    {
+      "default": "1",
+      "fieldname": "show_designation_filter",
+      "fieldtype": "Check",
+      "label": "Show Designation Filter"
+    },
+    {
+      "fieldname": "column_break_filters",
+      "fieldtype": "Column Break"
+    },
+    {
+      "default": "1",
+      "fieldname": "show_employee_filter",
+      "fieldtype": "Check",
+      "label": "Show Employee Picker"
+    },
+    {
+      "default": "1",
+      "fieldname": "enable_manual_add",
+      "fieldtype": "Check",
+      "label": "Enable Add Employee"
+    },
+    {
+      "default": "1",
+      "fieldname": "auto_hide_filters",
+      "fieldtype": "Check",
+      "label": "Auto Hide Filters"
+    },
+    {
+      "default": "1",
+      "fieldname": "default_submit_slips",
+      "fieldtype": "Check",
+      "label": "Default Submit Slips"
+    },
+    {
+      "fieldname": "section_break_components",
+      "fieldtype": "Section Break",
+      "label": "Quick Adjustment Fields"
     },
     {
       "default": "1",
@@ -56,92 +124,60 @@
       "label": "Enable Other Deduction"
     },
     {
-      "default": "1",
-      "fieldname": "enable_filter_fetch",
-      "fieldtype": "Check",
-      "label": "Enable Filter Fetch"
+      "fieldname": "section_break_source_defaults",
+      "fieldtype": "Section Break",
+      "label": "Default Source Mapping"
     },
     {
-      "default": "1",
-      "fieldname": "enable_manual_add",
-      "fieldtype": "Check",
-      "label": "Enable Manual Add"
-    },
-    {
-      "default": "1",
-      "fieldname": "enable_component_configuration",
-      "fieldtype": "Check",
-      "label": "Enable Component Configuration"
-    },
-    {
-      "default": "1",
-      "fieldname": "default_submit_slips",
-      "fieldtype": "Check",
-      "label": "Default Submit Slips"
-    },
-    {
-      "fieldname": "column_break_jkql",
-      "fieldtype": "Column Break"
-    },
-    {
-      "fieldname": "attendance_source",
+      "default": "Manual",
+      "fieldname": "default_calculation_mode",
       "fieldtype": "Select",
-      "label": "Attendance Source",
-      "options": "Manual\nAttendance\nEmployee Checkin",
-      "default": "Manual"
+      "label": "Default Calculation Mode",
+      "options": "Manual\nAttendance Based\nCheckin Based\nPer Piece or Per Hour"
     },
     {
-      "fieldname": "overtime_source",
+      "default": "Total Hours",
+      "fieldname": "default_per_piece_basis",
       "fieldtype": "Select",
-      "label": "Overtime Source",
-      "options": "Manual\nEmployee Checkin Difference\nCustom DocType\nPer Piece Qty",
-      "default": "Manual"
+      "label": "Default Per Piece Basis",
+      "options": "Total Hours\nTotal Qty"
     },
     {
       "fieldname": "overtime_doctype",
       "fieldtype": "Link",
-      "label": "Overtime Custom DocType",
+      "label": "Custom Source DocType",
       "options": "DocType"
     },
     {
       "fieldname": "overtime_employee_field",
-      "fieldtype": "Data",
-      "label": "Overtime Employee Field",
-      "depends_on": "eval:doc.overtime_source=='Custom DocType' || doc.overtime_source=='Per Piece Qty'"
+      "fieldtype": "Select",
+      "label": "Employee Field"
     },
     {
       "fieldname": "overtime_date_field",
-      "fieldtype": "Data",
-      "label": "Overtime Date Field",
-      "depends_on": "eval:doc.overtime_source=='Custom DocType' || doc.overtime_source=='Per Piece Qty'"
+      "fieldtype": "Select",
+      "label": "Date Field"
     },
     {
       "fieldname": "overtime_hours_field",
-      "fieldtype": "Data",
-      "label": "Overtime Hours Field",
-      "depends_on": "eval:doc.overtime_source=='Custom DocType' || doc.overtime_source=='Per Piece Qty'"
+      "fieldtype": "Select",
+      "label": "Total Hours Field"
     },
     {
       "fieldname": "overtime_qty_field",
-      "fieldtype": "Data",
-      "label": "Overtime Qty Field",
-      "depends_on": "eval:doc.overtime_source=='Per Piece Qty'"
+      "fieldtype": "Select",
+      "label": "Total Qty Field"
     },
     {
       "fieldname": "overtime_rate_field",
-      "fieldtype": "Data",
-      "label": "Overtime Rate Field",
-      "depends_on": "eval:doc.overtime_source=='Per Piece Qty'"
-    },
-    {
-      "fieldname": "column_break_opla",
-      "fieldtype": "Column Break"
+      "fieldtype": "Select",
+      "label": "Rate per Piece Field"
     }
   ],
   "issingle": 1,
   "links": [],
-  "modified": "2026-06-08 13:12:46.260322",
-  "modified_by": "techcraft986@gmail.com",
+  "modified": "2026-07-02 20:20:00.000000",
+  "modified_by": "Administrator",
   "module": "Payroll Bulk",
   "name": "Payroll Bulk Settings",
   "owner": "Administrator",

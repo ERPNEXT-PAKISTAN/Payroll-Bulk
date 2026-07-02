@@ -694,6 +694,8 @@ def _cancel_or_delete_existing_slip(slip_name: str):
 	if not slip_name or not frappe.db.exists("Salary Slip", slip_name):
 		return
 	slip = frappe.get_doc("Salary Slip", slip_name)
+	row_name = slip.get("bulk_salary_creation_employee")
+	batch_name = slip.get("bulk_salary_creation")
 	if slip.docstatus == 2:
 		return
 	if slip.get("journal_entry"):
@@ -711,7 +713,23 @@ def _cancel_or_delete_existing_slip(slip_name: str):
 	if slip.docstatus == 1:
 		slip.cancel()
 	else:
-		slip.delete()
+		if row_name and frappe.db.exists("Bulk Salary Creation Employee", row_name):
+			frappe.db.set_value(
+				"Bulk Salary Creation Employee",
+				row_name,
+				{
+					"salary_slip": "",
+					"salary_slip_status": "",
+					"status": "Pending",
+					"error_message": "",
+				},
+				update_modified=False,
+			)
+		frappe.delete_doc("Salary Slip", slip.name, force=1, ignore_permissions=True)
+		if batch_name and frappe.db.exists("Bulk Salary Creation", batch_name):
+			from payroll_bulk.events.salary_slip import _update_batch_summary
+
+			_update_batch_summary(batch_name)
 
 
 def _replace_salary_slip_rows(target_slip, source_slip):
@@ -1028,13 +1046,21 @@ def create_bulk_salary_slip(
 			"bulk_salary_creation_employee": row_name,
 		}
 	)
-	slip = make_salary_slip(
-		assignment.salary_structure,
-		target_doc=target_doc,
-		employee=row.employee,
-		posting_date=posting_date,
-		ignore_permissions=True,
-	)
+	make_salary_slip_kwargs = {
+		"target_doc": target_doc,
+		"employee": row.employee,
+		"posting_date": posting_date,
+	}
+	try:
+		slip = make_salary_slip(
+			assignment.salary_structure,
+			**make_salary_slip_kwargs,
+			ignore_permissions=True,
+		)
+	except TypeError as error:
+		if "ignore_permissions" not in str(error):
+			raise
+		slip = make_salary_slip(assignment.salary_structure, **make_salary_slip_kwargs)
 	preview_slip = frappe.copy_doc(slip)
 	preview_earnings_count = len(preview_slip.get("earnings") or [])
 	preview_deductions_count = len(preview_slip.get("deductions") or [])

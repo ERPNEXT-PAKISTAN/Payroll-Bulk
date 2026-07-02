@@ -9,11 +9,13 @@ import frappe
 def after_install():
 	_disable_legacy_scripts()
 	_cleanup_navigation_records()
+	_normalize_payroll_bulk_settings()
 
 
 def after_migrate():
 	_disable_legacy_scripts()
 	_cleanup_navigation_records()
+	_normalize_payroll_bulk_settings()
 
 
 def _disable_legacy_scripts():
@@ -109,3 +111,43 @@ def _ensure_payroll_bulk_in_desktop_layout():
 		layout_items.append(layout_icon)
 		layout_doc.layout = json.dumps(layout_items)
 		layout_doc.save(ignore_permissions=True)
+
+
+def _normalize_payroll_bulk_settings():
+	settings = frappe.get_single("Payroll Bulk Settings")
+	updates = {}
+	legacy_settings = not settings.get("default_calculation_mode")
+
+	if legacy_settings:
+		updates["default_calculation_mode"] = "Manual"
+	elif settings.get("default_calculation_mode") == "Per Piece Qty":
+		updates["default_calculation_mode"] = "Per Piece or Per Hour"
+
+	if not settings.get("default_per_piece_basis"):
+		updates["default_per_piece_basis"] = "Total Hours"
+
+	for fieldname in (
+		"show_department_filter",
+		"show_branch_filter",
+		"show_designation_filter",
+		"show_employee_filter",
+		"auto_hide_filters",
+	):
+		if legacy_settings or settings.get(fieldname) is None:
+			updates[fieldname] = 1
+
+	if legacy_settings and settings.get("enable_manual_add") is None:
+		updates["enable_manual_add"] = 1
+	elif legacy_settings:
+		updates["enable_manual_add"] = 1
+
+	if not settings.get("enable_filter_fetch"):
+		updates["show_department_filter"] = 0
+		updates["show_branch_filter"] = 0
+		updates["show_designation_filter"] = 0
+
+	if not settings.get("show_employee_filter"):
+		updates["enable_manual_add"] = 0
+
+	if updates:
+		frappe.db.set_value("Payroll Bulk Settings", "Payroll Bulk Settings", updates, update_modified=False)
