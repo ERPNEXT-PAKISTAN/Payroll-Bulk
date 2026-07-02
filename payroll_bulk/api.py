@@ -123,11 +123,46 @@ def _get_component_rules_from_structures(company: str | None = None) -> list[dic
 	]
 
 
+def _merge_component_rules(existing_rules: list[dict] | None, inferred_rules: list[dict] | None) -> list[dict]:
+	existing_rules = existing_rules or []
+	inferred_rules = inferred_rules or []
+	merged: list[dict] = []
+	seen: set[tuple[str, str]] = set()
+
+	def append_rule(rule: dict | None):
+		if not rule:
+			return
+		component = (rule.get("salary_component") or "").strip()
+		component_type = (rule.get("component_type") or "").strip()
+		if not component:
+			return
+		if not component_type:
+			component_type = frappe.db.get_value("Salary Component", component, "type") or "Earning"
+		key = (component_type, component)
+		if key in seen:
+			return
+		seen.add(key)
+		merged.append(
+			{
+				"salary_component": component,
+				"component_type": component_type,
+				"enabled": cint(rule.get("enabled", 1)),
+			}
+		)
+
+	for rule in existing_rules:
+		append_rule(rule)
+	for rule in inferred_rules:
+		append_rule(rule)
+
+	return merged
+
+
 @frappe.whitelist()
 def sync_payroll_bulk_component_rules(company: str | None = None):
 	settings = frappe.get_single("Payroll Bulk Settings")
 	company = company or settings.company or frappe.defaults.get_user_default("Company")
-	rules = _get_component_rules_from_structures(company)
+	rules = _merge_component_rules(settings.get("component_rules"), _get_component_rules_from_structures(company))
 	settings.set("component_rules", [])
 	for rule in rules:
 		settings.append("component_rules", rule)
@@ -894,7 +929,12 @@ def _structure_needs_base_fallback(structure_doc) -> bool:
 	return True
 
 
-def _calculate_batch_base_amount(row) -> float:
+def _calculate_batch_base_amount(row, calculation_mode: str | None = None) -> float:
+	if calculation_mode == "Per Piece or Per Hour":
+		ctc = flt(row.get("ctc"))
+		hourly_rate = flt(ctc / 30 / 8) if ctc else 0
+		return flt(hourly_rate * flt(row.get("source_hours")) + flt(row.get("source_qty")) * flt(row.get("piece_rate")))
+
 	payment_days = flt(row.get("payment_days"))
 	ctc = flt(row.get("ctc"))
 	if payment_days and payment_days < 30:
@@ -970,13 +1010,16 @@ def _upsert_additional_salary(
 	return additional_salary.name
 
 
-def _create_base_additional_salary_if_needed(row, assignment, company, start_date, end_date, posting_date, batch_name):
+def _create_base_additional_salary_if_needed(row, assignment, company, start_date, end_date, posting_date, batch_name, calculation_mode: str | None = None):
+	if calculation_mode == "Per Piece or Per Hour":
+		return
+
 	structure_doc = frappe.get_cached_doc("Salary Structure", assignment.salary_structure)
 	if not _structure_needs_base_fallback(structure_doc):
 		return
 
 	base_component = _guess_base_component(structure_doc)
-	base_amount = _calculate_batch_base_amount(row)
+	base_amount = _calculate_batch_base_amount(row, calculation_mode)
 	if not base_component or base_amount <= 0:
 		return
 
@@ -1084,15 +1127,17 @@ def create_bulk_salary_slip(
 		_cancel_or_delete_existing_slip(row.salary_slip)
 
 	assignment = _get_salary_structure_assignment(row.employee, payroll_frequency, start_date, end_date)
+	batch = frappe.get_cached_doc("Bulk Salary Creation", batch_name)
+	calculation_mode = batch.calculation_mode or "Manual"
 	ctc = flt(ctc or row.get("ctc"))
-	if flt(assignment.base) <= 0 and ctc > 0:
+	if calculation_mode != "Per Piece or Per Hour" and flt(assignment.base) <= 0 and ctc > 0:
 		frappe.db.set_value(
 			"Salary Structure Assignment", assignment.name, "base", ctc, update_modified=True
 		)
 		assignment.base = ctc
 
 	_create_base_additional_salary_if_needed(
-		row, assignment, company, start_date, end_date, posting_date, batch_name
+		row, assignment, company, start_date, end_date, posting_date, batch_name, calculation_mode
 	)
 
 	make_salary_slip = frappe.get_attr(

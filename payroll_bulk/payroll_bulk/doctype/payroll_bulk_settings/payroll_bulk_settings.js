@@ -2,6 +2,7 @@ frappe.ui.form.on("Payroll Bulk Settings", {
   refresh(frm) {
     pb_refresh_source_fields(frm);
     pb_bind_component_rule_query(frm);
+    pb_toggle_source_fields(frm);
     if (!frm.is_new()) {
       frm.add_custom_button(__("Load Components from Structures"), async () => {
         const company = frm.doc.company || frappe.defaults.get_default("company");
@@ -102,9 +103,7 @@ function pb_filter_source_fields(fields, kind) {
 
 function pb_toggle_source_fields(frm) {
   const piece_mode = frm.doc.default_calculation_mode === "Per Piece or Per Hour";
-  const qty_mode = piece_mode && frm.doc.default_per_piece_basis === "Total Qty";
-
-  frm.toggle_display("default_per_piece_basis", piece_mode);
-  frm.toggle_display("overtime_qty_field", qty_mode);
-  frm.toggle_display("overtime_rate_field", qty_mode);
+  frm.toggle_display("default_per_piece_basis", false);
+  frm.toggle_display("overtime_qty_field", piece_mode);
+  frm.toggle_display("overtime_rate_field", piece_mode);
 }
