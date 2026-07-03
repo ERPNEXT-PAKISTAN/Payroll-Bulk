@@ -830,10 +830,11 @@ function render_main_ui(frm) {
       <div class="bs-action-bar">
         <button class="bs-btn-secondary" id="bs-refresh-all-btn">⟳ Refresh All Status</button>
         <button class="bs-btn-secondary" id="bs-open-submitted-btn">↗ Open Submitted Slips</button>
+        <button class="bs-btn-secondary" id="bs-submit-drafts-btn">✓ Submit Draft Slips</button>
         <button class="bs-btn-secondary" id="bs-create-accrual-btn">🧾 Create Accrual JE</button>
         <button class="bs-btn-secondary" id="bs-create-missing-btn">＋ Create Missing Only</button>
         <button class="bs-btn-secondary" id="bs-save-draft-btn">💾 Save Draft</button>
-        <button class="bs-btn-primary bs-btn-lg" id="bs-review-btn">Review &amp; Create Slips →</button>
+        <button class="bs-btn-primary bs-btn-lg" id="bs-review-btn">Review &amp; Create Draft Slips →</button>
       </div>
 
     </div></div>
@@ -917,6 +918,7 @@ function render_main_ui(frm) {
   emp_ctrl && $wrap.find("#bs-emp-link-wrap input").on("keydown", (e) => { if (e.key==="Enter") bs_quick_add(); });
   $wrap.find("#bs-refresh-all-btn").on("click",    () => bs_refresh_all_statuses());
   $wrap.find("#bs-open-submitted-btn").on("click", () => bs_open_submitted_slips());
+  $wrap.find("#bs-submit-drafts-btn").on("click",  () => bs_submit_draft_slips());
   $wrap.find("#bs-create-accrual-btn").on("click", () => bs_create_accrual_journal_entry());
   $wrap.find("#bs-create-missing-btn").on("click", () => open_payroll_dialog({ create_missing_only: true }));
   $wrap.find("#bs-save-draft-btn").on("click",     () => bs_save_draft());
@@ -1890,6 +1892,41 @@ function bs_open_submitted_slips() {
   });
 }
 
+async function bs_submit_draft_slips() {
+  const frm = window._bs.frm;
+  const draft_rows = (window._bs.rows || []).filter((row) => row.salary_slip && row.salary_slip_status === "Draft");
+  if (!draft_rows.length) {
+    frappe.show_alert({ message: "No draft Salary Slips found.", indicator: "orange" }, 4);
+    return;
+  }
+
+  frappe.dom.freeze(`Submitting ${draft_rows.length} draft Salary Slip(s)...`);
+  try {
+    for (const row of draft_rows) {
+      const res = await bs_call("frappe.client.get", { doctype: "Salary Slip", name: row.salary_slip });
+      await bs_call("frappe.client.submit", { doc: res.message });
+      row.salary_slip_status = "Submitted";
+      row.status = "Submitted";
+      row.error_message = "";
+      const child = bs_find_child_row(frm, row);
+      if (child) {
+        child.salary_slip_status = "Submitted";
+        child.status = "Submitted";
+        child.error_message = "";
+      }
+    }
+    bs_sync_to_frm(frm);
+    await new Promise((res, rej) => frm.save("Save", (r) => r.exc ? rej(new Error(r.exc)) : res(r)));
+    frappe.show_alert({ message: "Draft Salary Slips submitted.", indicator: "green" }, 4);
+    bs_render_table();
+    bs_render_live_summary(frm);
+  } catch (error) {
+    frappe.msgprint({ title: "Submit Error", message: error.message || String(error), indicator: "red" });
+  } finally {
+    frappe.dom.unfreeze();
+  }
+}
+
 function recalc_row(row) {
   const frm = window._bs.frm || { doc: {} };
   const mode = frm.doc.calculation_mode || "Manual";
@@ -2319,15 +2356,15 @@ function open_payroll_dialog(config = {}) {
   }
 
   const frm     = window._bs.frm;
-  const company = frm.doc.company || frappe.defaults.get_default("company");
-  const current_frequency = frm.doc.payroll_frequency || "Monthly";
-  const current_start_date = frm.doc.start_date || null;
-  const current_end_date = frm.doc.end_date || null;
-  const current_posting_date = frm.doc.posting_date || frappe.datetime.get_today();
+  const company = $("#bs-company-wrap input").val() || frm.doc.company || frappe.defaults.get_default("company");
+  const current_frequency = $("#bs-head-frequency").val() || frm.doc.payroll_frequency || "Monthly";
+  const current_start_date = $("#bs-head-start-date").val() || frm.doc.start_date || null;
+  const current_end_date = $("#bs-head-end-date").val() || frm.doc.end_date || null;
+  const current_posting_date = $("#bs-head-posting-date").val() || frm.doc.posting_date || frappe.datetime.get_today();
   const settings = window._bs.settings || bs_default_settings();
 
   const d = new frappe.ui.Dialog({
-    title: "Payroll Details",
+    title: "Create Draft Salary Slips",
     size:  "small",
     fields: [
       { fieldtype:"HTML", fieldname:"info",
@@ -2345,14 +2382,12 @@ function open_payroll_dialog(config = {}) {
       { fieldtype:"Date", fieldname:"end_date",   label:"End Date",   reqd:1, default: current_end_date },
       { fieldtype:"Date", fieldname:"posting_date", label:"Posting Date",
         reqd:1, default: current_posting_date },
-      { fieldtype:"Check", fieldname:"submit_slips",
-        label:"Submit Salary Slips after creation", default: Number(settings.default_submit_slips) ? 1 : 0 },
       { fieldtype:"Check", fieldname:"replace_existing_slips",
         label:"Cancel and Recreate Existing Slips", default: 0 },
       { fieldtype:"Check", fieldname:"create_missing_only",
         label:"Create Missing Slips Only", default: config.create_missing_only ? 1 : 0 },
     ],
-    primary_action_label: config.create_missing_only ? "Create Missing Slips" : "Confirm & Create Slips",
+    primary_action_label: config.create_missing_only ? "Create Missing Draft Slips" : "Create Draft Slips",
     primary_action(vals) {
       if (!vals.start_date || !vals.end_date) {
         frappe.show_alert({ message:"Dates are required.", indicator:"red" }, 4); return;
@@ -2360,12 +2395,8 @@ function open_payroll_dialog(config = {}) {
       if (vals.start_date > vals.end_date) {
         frappe.show_alert({ message:"Start date cannot be after end date.", indicator:"red" }, 4); return;
       }
-      vals.overtime_component = frm.doc.overtime_component || "";
-      vals.bonus_component = frm.doc.bonus_component || "";
-      vals.allowance_component = frm.doc.allowance_component || "";
       vals.advance_deduction_component = "Advance Deduction";
-      vals.late_deduction_component = frm.doc.late_deduction_component || "";
-      vals.deduction_component = frm.doc.deduction_component || "";
+      vals.submit_slips = 0;
       d.hide();
       process_bulk(frm, vals);
     },

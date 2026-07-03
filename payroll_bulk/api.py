@@ -1136,10 +1136,6 @@ def create_bulk_salary_slip(
 		)
 		assignment.base = ctc
 
-	_create_base_additional_salary_if_needed(
-		row, assignment, company, start_date, end_date, posting_date, batch_name, calculation_mode
-	)
-
 	make_salary_slip = frappe.get_attr(
 		"hrms.payroll.doctype.salary_structure.salary_structure.make_salary_slip"
 	)
