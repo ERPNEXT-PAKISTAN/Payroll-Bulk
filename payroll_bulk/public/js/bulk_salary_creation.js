@@ -185,9 +185,9 @@ function bs_apply_source_defaults(frm, settings) {
   frm.doc.overtime_hours_field = frm.doc.overtime_hours_field || settings.overtime_hours_field || "";
   frm.doc.overtime_qty_field = frm.doc.overtime_qty_field || settings.overtime_qty_field || "";
   frm.doc.overtime_rate_field = frm.doc.overtime_rate_field || settings.overtime_rate_field || "";
-  frm.doc.use_hours = ("use_hours" in frm.doc) ? frm.doc.use_hours : bs_to_int(settings.default_use_hours, 1);
-  frm.doc.use_qty = ("use_qty" in frm.doc) ? frm.doc.use_qty : bs_to_int(settings.default_use_qty, 1);
-  frm.doc.overtime_with_salary = ("overtime_with_salary" in frm.doc) ? frm.doc.overtime_with_salary : bs_to_int(settings.default_overtime_with_salary, 0);
+  frm.doc.use_hours = [undefined, null, ""].includes(frm.doc.use_hours) ? bs_to_int(settings.default_use_hours, 1) : bs_to_int(frm.doc.use_hours, 1);
+  frm.doc.use_qty = [undefined, null, ""].includes(frm.doc.use_qty) ? bs_to_int(settings.default_use_qty, 1) : bs_to_int(frm.doc.use_qty, 1);
+  frm.doc.overtime_with_salary = [undefined, null, ""].includes(frm.doc.overtime_with_salary) ? bs_to_int(settings.default_overtime_with_salary, 0) : bs_to_int(frm.doc.overtime_with_salary, 0);
   Object.assign(frm.doc, bs_normalize_source_values(frm.doc));
   if (frm.doc.month && (!frm.doc.start_date || !frm.doc.end_date)) {
     bs_apply_month_period(frm, frm.doc.month);
@@ -553,6 +553,7 @@ function render_main_ui(frm) {
   window._bs.frm     = frm;
   window._bs.rows    = [];
   window._bs.counter = 0;
+  window._bs.global_piece_flags = null;
   const settings = window._bs.settings || bs_default_settings();
   settings.enable_component_configuration = 0;
   bs_apply_source_defaults(frm, settings);
@@ -1221,8 +1222,8 @@ function bs_get_auto_component_meta(row, mode) {
   if (bs_is_piece_mode(mode)) {
     return [
       row.overtime_with_salary && base_component ? { label: "Base", component: base_component, amount: parseFloat(row.ctc || 0) || 0 } : null,
-      hours_component ? { label: "Hours", component: hours_component, amount: parseFloat(row.hours_amount || 0) || 0 } : null,
-      qty_component ? { label: "Qty", component: qty_component, amount: parseFloat(row.qty_amount || 0) || 0 } : null,
+      row.use_hours && hours_component ? { label: "Hours", component: hours_component, amount: parseFloat(row.hours_amount || 0) || 0 } : null,
+      row.use_qty && qty_component ? { label: "Qty", component: qty_component, amount: parseFloat(row.qty_amount || 0) || 0 } : null,
     ].filter(Boolean);
   }
 
@@ -1343,7 +1344,7 @@ function bs_build_row_components(row, structure_doc, options = {}) {
       });
     }
 
-    if (hours_component) {
+    if (row.use_hours && hours_component) {
       const key = `Earning::hours::${hours_component}`;
       auto_items.push({
         key,
@@ -1356,7 +1357,7 @@ function bs_build_row_components(row, structure_doc, options = {}) {
       });
     }
 
-    if (qty_component) {
+    if (row.use_qty && qty_component) {
       const key = `Earning::qty::${qty_component}`;
       auto_items.push({
         key,
@@ -1537,15 +1538,15 @@ function bs_render_table() {
     const work_input_html = bs_is_piece_mode(mode)
       ? `
           <div class="bs-piece-stack">
-            <div class="bs-piece-line">
+            ${r.use_hours || r.overtime_with_salary ? `<div class="bs-piece-line">
               <input class="bs-piece-check" type="checkbox" ${r.use_hours ? "checked" : ""} ${r.overtime_with_salary ? "disabled" : ""} onchange="bs_toggle_piece_part(${r._id},'use_hours',this.checked)"/>
               <input class="bs-input-sm bs-editable bs-piece-input" type="number" min="0" step="0.01" inputmode="decimal"
                 placeholder="" value="${bs_input_value(r.source_hours)}" onfocus="this.select()"
                 onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'source_hours',this.value)"/>
               <input class="bs-input-sm bs-piece-input bs-piece-readonly" type="text" tabindex="-1" readonly value="${fmt_num(hourly, 2)}"/>
               <input class="bs-input-sm bs-piece-input bs-piece-total" type="text" tabindex="-1" readonly value="${fmt_total(hours_amount)}"/>
-            </div>
-            <div class="bs-piece-line">
+            </div>` : ``}
+            ${r.use_qty ? `<div class="bs-piece-line">
               <input class="bs-piece-check" type="checkbox" ${r.use_qty ? "checked" : ""} onchange="bs_toggle_piece_part(${r._id},'use_qty',this.checked)"/>
               <input class="bs-input-sm bs-editable bs-piece-input" type="number" min="0" step="0.01" inputmode="decimal"
                 placeholder="" value="${bs_input_value(r.source_qty)}" onfocus="this.select()"
@@ -1554,7 +1555,7 @@ function bs_render_table() {
                 placeholder="" value="${bs_input_value(r.piece_rate)}" onfocus="this.select()"
                 onkeydown="bs_handle_edit_keydown(event,this)" onchange="bs_update_amount(${r._id},'piece_rate',this.value)"/>
               <input class="bs-input-sm bs-piece-input bs-piece-total" type="text" tabindex="-1" readonly value="${fmt_total(qty_amount)}"/>
-            </div>
+            </div>` : ``}
             <div class="bs-ot-amount-row"><span class="bs-ot-amount bs-piece-total-pill">${fmt_total(hours_amount + qty_amount)}</span></div>
           </div>
           `
