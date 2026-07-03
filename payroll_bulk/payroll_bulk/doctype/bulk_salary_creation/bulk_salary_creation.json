@@ -957,6 +957,30 @@
       "depends_on": "eval:doc.calculation_mode=='Per Piece or Per Hour'"
     },
     {
+      "fieldname": "use_hours",
+      "fieldtype": "Check",
+      "label": "Use Hours",
+      "default": "1",
+      "allow_on_submit": 1,
+      "hidden": 1
+    },
+    {
+      "fieldname": "use_qty",
+      "fieldtype": "Check",
+      "label": "Use Qty",
+      "default": "1",
+      "allow_on_submit": 1,
+      "hidden": 1
+    },
+    {
+      "fieldname": "overtime_with_salary",
+      "fieldtype": "Check",
+      "label": "Overtime with Salary",
+      "default": "0",
+      "allow_on_submit": 1,
+      "hidden": 1
+    },
+    {
       "fieldname": "column_break_source_b",
       "fieldtype": "Column Break"
     },
@@ -3406,6 +3430,9 @@
     "attendance_source",
     "overtime_source",
     "per_piece_basis",
+    "use_hours",
+    "use_qty",
+    "overtime_with_salary",
     "column_break_source_b",
     "overtime_doctype",
     "overtime_employee_field",

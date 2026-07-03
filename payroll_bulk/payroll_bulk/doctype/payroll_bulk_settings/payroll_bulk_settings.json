@@ -27,6 +27,9 @@
   "overtime_qty_field",
   "qty_component",
   "overtime_rate_field",
+  "default_use_hours",
+  "default_use_qty",
+  "default_overtime_with_salary",
   "column_break_padl",
   "overtime_hours_field",
   "hours_component",
@@ -145,6 +148,24 @@
    "fieldname": "overtime_rate_field",
    "fieldtype": "Select",
    "label": "Rate per Piece Field"
+  },
+  {
+   "default": "1",
+   "fieldname": "default_use_hours",
+   "fieldtype": "Check",
+   "label": "Default Use Hours"
+  },
+  {
+   "default": "1",
+   "fieldname": "default_use_qty",
+   "fieldtype": "Check",
+   "label": "Default Use Qty"
+  },
+  {
+   "default": "0",
+   "fieldname": "default_overtime_with_salary",
+   "fieldtype": "Check",
+   "label": "Default Overtime with Salary"
   },
   {
    "fieldname": "hours_component",
