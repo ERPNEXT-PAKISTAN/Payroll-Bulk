@@ -15,6 +15,10 @@
   "enable_manual_add",
   "auto_hide_filters",
   "default_submit_slips",
+  "column_break_tsdi",
+  "default_overtime_with_salary",
+  "default_use_qty",
+  "default_use_hours",
   "section_break_components",
   "auto_load_structure_components",
   "component_rules",
@@ -27,9 +31,6 @@
   "overtime_qty_field",
   "qty_component",
   "overtime_rate_field",
-  "default_use_hours",
-  "default_use_qty",
-  "default_overtime_with_salary",
   "column_break_padl",
   "overtime_hours_field",
   "hours_component",
@@ -203,11 +204,15 @@
   {
    "fieldname": "column_break_padl",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_tsdi",
+   "fieldtype": "Column Break"
   }
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-07-03 00:55:16.115778",
+ "modified": "2026-07-03 16:15:30.215455",
  "modified_by": "techcraft986@gmail.com",
  "module": "Payroll Bulk",
  "name": "Payroll Bulk Settings",

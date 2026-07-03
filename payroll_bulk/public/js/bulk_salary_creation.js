@@ -185,9 +185,9 @@ function bs_apply_source_defaults(frm, settings) {
   frm.doc.overtime_hours_field = frm.doc.overtime_hours_field || settings.overtime_hours_field || "";
   frm.doc.overtime_qty_field = frm.doc.overtime_qty_field || settings.overtime_qty_field || "";
   frm.doc.overtime_rate_field = frm.doc.overtime_rate_field || settings.overtime_rate_field || "";
-  frm.doc.use_hours = [undefined, null, ""].includes(frm.doc.use_hours) ? bs_to_int(settings.default_use_hours, 1) : bs_to_int(frm.doc.use_hours, 1);
-  frm.doc.use_qty = [undefined, null, ""].includes(frm.doc.use_qty) ? bs_to_int(settings.default_use_qty, 1) : bs_to_int(frm.doc.use_qty, 1);
-  frm.doc.overtime_with_salary = [undefined, null, ""].includes(frm.doc.overtime_with_salary) ? bs_to_int(settings.default_overtime_with_salary, 0) : bs_to_int(frm.doc.overtime_with_salary, 0);
+  frm.doc.use_hours = bs_to_int(settings.default_use_hours, 1);
+  frm.doc.use_qty = bs_to_int(settings.default_use_qty, 1);
+  frm.doc.overtime_with_salary = bs_to_int(settings.default_overtime_with_salary, 0);
   Object.assign(frm.doc, bs_normalize_source_values(frm.doc));
   if (frm.doc.month && (!frm.doc.start_date || !frm.doc.end_date)) {
     bs_apply_month_period(frm, frm.doc.month);
@@ -508,9 +508,9 @@ async function bs_bind_source_controls(frm, settings, $wrap) {
   bs_control_set_value(source_ctrls.calculation_mode, frm.doc.calculation_mode || "Manual");
   bs_control_set_value(source_ctrls.overtime_source, "Manual");
   bs_control_set_value(source_ctrls.per_piece_basis, frm.doc.per_piece_basis || "Total Hours");
-  source_ctrls.global_use_hours.prop("checked", window._bs.global_piece_flags?.use_hours ?? bs_to_int(frm.doc.use_hours, bs_to_int(settings.default_use_hours, 1)));
-  source_ctrls.global_use_qty.prop("checked", window._bs.global_piece_flags?.use_qty ?? bs_to_int(frm.doc.use_qty, bs_to_int(settings.default_use_qty, 1)));
-  source_ctrls.global_overtime_with_salary.prop("checked", window._bs.global_piece_flags?.overtime_with_salary ?? bs_to_int(frm.doc.overtime_with_salary, bs_to_int(settings.default_overtime_with_salary, 0)));
+  source_ctrls.global_use_hours.prop("checked", bs_to_int(settings.default_use_hours, 1));
+  source_ctrls.global_use_qty.prop("checked", bs_to_int(settings.default_use_qty, 1));
+  source_ctrls.global_overtime_with_salary.prop("checked", bs_to_int(settings.default_overtime_with_salary, 0));
   window._bs.global_piece_flags = bs_get_global_piece_flags();
   bs_control_set_value(source_ctrls.overtime_doctype, frm.doc.overtime_doctype || settings.overtime_doctype || "");
   await bs_refresh_source_field_options(frm);
@@ -695,18 +695,17 @@ function render_main_ui(frm) {
           </div>
           ` : ``}
           ${show_manual_employee ? `
-          <div class="bs-field-wrap bs-floating-field bs-employee-picker bs-field-with-top-action">
-            <div class="bs-top-action-wrap"><button class="bs-btn-primary bs-filter-action-btn" id="bs-add-btn">＋ Add</button></div>
+          <div class="bs-field-wrap bs-floating-field bs-employee-picker">
             <span class="bs-field-caption">Employee</span><div id="bs-emp-link-wrap"></div>
+          </div>
+          <div class="bs-filter-btn-wrap bs-filter-btn-stack">
+            <button class="bs-btn-primary bs-filter-action-btn" id="bs-add-btn">＋ Add</button>
           </div>
           ` : ``}
         </div>
         ` : ``}
         <div id="bs-fetch-notice" style="display:none" class="bs-notice bs-notice-info"></div>
         <div id="bs-add-notice" style="display:none" class="bs-notice bs-notice-warn"></div>
-        <div class="bs-config-note" style="margin-top:8px">
-          Select month first. It auto-fills period dates and stores the salary month in this Bulk Salary Creation entry.
-        </div>
         <div class="bs-source-grid">
           <div class="bs-source-row">
           <div class="bs-field-wrap bs-floating-field">
@@ -725,8 +724,8 @@ function render_main_ui(frm) {
               <option value="Total Qty">Total Qty</option>
             </select>
           </div>
-          <label class="bs-piece-filter-check bs-per-piece-basis-field bs-piece-mode-option"><input id="bs-global-use-hours" type="checkbox" checked /> <span>Use Hours</span></label>
-          <label class="bs-piece-filter-check bs-per-piece-basis-field bs-piece-mode-option"><input id="bs-global-use-qty" type="checkbox" checked /> <span>Use Qty</span></label>
+          <label class="bs-piece-filter-check bs-per-piece-basis-field bs-piece-mode-option"><input id="bs-global-use-hours" type="checkbox" /> <span>Use Hours</span></label>
+          <label class="bs-piece-filter-check bs-per-piece-basis-field bs-piece-mode-option"><input id="bs-global-use-qty" type="checkbox" /> <span>Use Qty</span></label>
           <label class="bs-piece-filter-check bs-per-piece-basis-field bs-piece-mode-option"><input id="bs-global-overtime-with-salary" type="checkbox" /> <span>Overtime with Salary</span></label>
           <div class="bs-field-wrap bs-floating-field bs-source-map-field">
             <div id="bs-overtime-doctype-wrap"></div>
@@ -748,12 +747,12 @@ function render_main_ui(frm) {
           <div class="bs-field-wrap bs-floating-field bs-source-map-piece">
             <select id="bs-overtime-rate-field" class="bs-select-sm bs-select-full"><option value="">Rate per Piece Field</option></select>
           </div>
+          <div class="bs-filter-btn-wrap bs-filter-btn-stack">
+            <button class="bs-btn-secondary bs-filter-action-btn" id="bs-load-source-btn" style="display:none">⭳ Load Source Data</button>
+          </div>
           </div>
         </div>
-        <div class="bs-footer-row" style="margin-top:12px">
-          <span id="bs-source-note" class="bs-footer-hint">Manual mode uses direct entry for base pay and overtime.</span>
-          <button class="bs-btn-secondary" id="bs-load-source-btn" style="display:none">⭳ Load Source Data</button>
-        </div>
+        <div id="bs-source-note" class="bs-source-note-hidden"></div>
       </div>
       ${settings.enable_component_configuration ? `
       <div class="bs-panel bs-mb" id="bs-component-panel" style="display:none">
@@ -1458,8 +1457,10 @@ function bs_render_table() {
           ? `<div class="bs-adv-wrap">
               ${r.advances.map((a,i)=>`
                 <div class="bs-adv-row">
-                  <span class="bs-adv-id">${a.name}</span>
-                  <span class="bs-adv-bal">Bal: ${fmt_num(a.balance)}</span>
+                  <div class="bs-adv-stack">
+                    <span class="bs-adv-id">${a.name}</span>
+                    <span class="bs-adv-bal">Bal: ${fmt_num(a.balance)}</span>
+                  </div>
                   <input class="bs-adv-input" type="number" min="0" max="${a.balance}"
                     value="${a.deduct||0}" placeholder="Deduct amt"
                     onchange="bs_update_adv_deduct(${r._id},${i},this.value)"
@@ -1468,9 +1469,7 @@ function bs_render_table() {
               <div class="bs-adv-total">Total deduction: <b>${fmt_num(r.adv_deduct)}</b></div>
              </div>`
           : `<span style="color:var(--bs-muted);font-size:11px">No advances</span>`)
-      : `<button class="bs-btn-ghost bs-btn-sm" onclick="bs_fetch_advances_for(${r._id})">
-           Fetch Advances
-         </button>`;
+      : `<span style="color:var(--bs-muted);font-size:11px">Load from Fetch All Advances</span>`;
 
     const component_totals = bs_get_component_totals(r);
     const render_component_inputs = (type) => (r.components || [])
@@ -2130,8 +2129,8 @@ function bs_sync_to_frm(frm) {
   frm.doc.use_hours = window._bs.global_piece_flags?.use_hours ?? frm.doc.use_hours ?? 1;
   frm.doc.use_qty = window._bs.global_piece_flags?.use_qty ?? frm.doc.use_qty ?? 1;
   frm.doc.overtime_with_salary = window._bs.global_piece_flags?.overtime_with_salary ?? frm.doc.overtime_with_salary ?? 0;
-  frm.doc.employees = [];
-  frm.doc.component_entries = [];
+  frappe.model.clear_table(frm.doc, "employees");
+  frappe.model.clear_table(frm.doc, "component_entries");
   window._bs.rows.forEach((row) => {
     if (!row.employee) return;
     const c = frappe.model.add_child(frm.doc, "Bulk Salary Creation Employee", "employees");
@@ -2920,12 +2919,7 @@ async function process_bulk(frm, vals) {
     bs_sync_to_frm(frm);
     await new Promise((res, rej) => frm.save("Save", (r) => r.exc ? rej(new Error(r.exc)) : res(r)));
     log("Parent results saved ✓", "success");
-    if (!has_failures) {
-      await new Promise((res, rej) => frm.save("Submit", (r) => r.exc ? rej(new Error(r.exc)) : res(r)));
-      log("Parent doc submitted ✓", "success");
-    } else {
-      log("Parent kept in Draft because some rows failed.", "info");
-    }
+    log(has_failures ? "Parent kept in Draft because some rows failed." : "Parent remains Draft. Salary Slips are submitted separately.", has_failures ? "info" : "success");
   } catch (e) {
     log(`Parent finalize failed: ${e.message || e}`, "error");
     frappe.msgprint({ title:"Finalize Error", message:e.message || String(e), indicator:"red" });
@@ -3679,22 +3673,22 @@ function inject_bs_styles() {
     .bs-collapsible{overflow:hidden;transition:all .18s ease}
     .bs-collapsible.is-collapsed{display:none}
     .bs-mb{margin-bottom:10px}
-    .bs-panel{overflow:visible;background:var(--bs-surface);border:1px solid var(--bs-border);border-radius:10px;padding:5px 7px;box-shadow:var(--bs-shadow)}
+    .bs-panel{overflow:visible;background:var(--bs-surface);border:1px solid var(--bs-border);border-radius:10px;padding:5px 6px;box-shadow:var(--bs-shadow)}
     .bs-panel-soft{background:linear-gradient(180deg,#fcfdff 0%,#f6faff 100%)}
     .bs-head-inline-label{display:inline-flex;align-items:center;padding:0 8px;height:24px;border:1px solid var(--bs-border);border-radius:6px;background:#f8fafc;color:#64748b;font-size:10px;font-weight:700}
-    .bs-qa-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(140px,1fr) minmax(140px,1fr) minmax(100px,.4fr) minmax(180px,1.15fr);gap:4px;align-items:end}
+    .bs-qa-row{display:grid;grid-template-columns:minmax(145px,1fr) minmax(145px,1fr) minmax(135px,1fr) minmax(135px,1fr) 86px minmax(150px,.92fr) 86px;gap:3px;align-items:end}
     .bs-config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
-    .bs-source-grid{display:flex;flex-direction:column;gap:4px}
-    .bs-source-row{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;align-items:end}
+    .bs-source-grid{display:flex;flex-direction:column;gap:3px}
+    .bs-source-row{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:3px;align-items:end}
     .bs-piece-filter-check{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border:1px solid var(--bs-border);border-radius:6px;background:#fff;color:#475569;font-size:10px;font-weight:700}
     .bs-piece-filter-check input{width:14px;height:14px;margin:0}
-    .bs-config-note{font-size:11px;color:var(--bs-muted);margin:4px 0}
+    .bs-filter-panel-title{margin-bottom:4px}
     .bs-filter-btn-wrap{display:flex;align-items:flex-end}
     .bs-filter-btn-stack{align-items:flex-start}
     .bs-field-with-top-action{display:flex;flex-direction:column;gap:2px}
-    .bs-top-action-wrap{display:flex;justify-content:flex-end}
-    .bs-filter-action-btn{min-width:88px;height:28px}
-    .bs-employee-picker{min-width:180px}
+    .bs-top-action-wrap{display:flex;justify-content:flex-start}
+    .bs-filter-action-btn{min-width:86px;height:28px}
+    .bs-employee-picker{min-width:150px}
     .bs-search-filter-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
     .bs-search-row{flex:1;min-width:280px;margin:0}
     .bs-search-input{width:100%;max-width:640px;background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:8px;padding:8px 12px;font-size:12px;box-shadow:none}
@@ -3726,6 +3720,8 @@ function inject_bs_styles() {
     .bs-field-caption{display:none}
     .bs-label{font-size:11.5px;font-weight:700;color:#475569;user-select:none}
     .bs-select-full{width:100%}
+    .bs-source-note-hidden,.bs-config-note{display:none!important}
+    #bs-fetch-notice,#bs-add-notice{margin:0;padding:0;min-height:0;border:none;background:transparent}
 
     /* Buttons */
     .bs-btn-primary{height:26px;padding:0 12px;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:1px solid #1d4ed8;border-radius:6px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap;transition:all .15s;box-shadow:0 8px 18px rgba(37,99,235,.16)}
@@ -3751,20 +3747,20 @@ function inject_bs_styles() {
 
     /* Table */
     .bs-table-wrap{border:1px solid var(--bs-border);border-radius:var(--bs-radius);overflow:hidden;overflow-y:auto;margin-bottom:4px;background:var(--bs-surface);box-shadow:var(--bs-shadow)}
-    .bs-table{width:100%;border-collapse:collapse;font-size:13px}
-    .bs-th{background:linear-gradient(180deg,#f8fbff 0%,#eef4ff 100%);padding:10px 12px;text-align:left;font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:#475569;border-bottom:1px solid var(--bs-border)}
-    .bs-td{padding:7px 10px;border-bottom:1px solid #e9eef5;vertical-align:middle;background:#fff}
+    .bs-table{width:100%;border-collapse:collapse;font-size:14px}
+    .bs-th{background:linear-gradient(180deg,#f8fbff 0%,#eef4ff 100%);padding:11px 12px;text-align:left;font-size:11.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:#475569;border-bottom:1px solid var(--bs-border)}
+    .bs-td{padding:8px 10px;border-bottom:1px solid #e9eef5;vertical-align:middle;background:#fff}
     .bs-row:last-child .bs-td{border-bottom:none}
     .bs-row:nth-child(even) .bs-td{background:#fbfdff}
     .bs-row:hover .bs-td{background:#f0f7ff}
     .bs-row-detail .bs-td-detail{padding:0 10px 1px;border-bottom:1px solid #e9eef5;background:#f8fafc}
     .bs-row-detail-adjust .bs-td-detail{padding:0 10px 2px;background:linear-gradient(180deg,#fff7d6 0%,#ffeeba 100%);border-top:1px solid #fde68a;border-bottom:1px solid #fcd34d}
     .bs-row-detail-adjust:nth-of-type(3n) .bs-td-detail{background:linear-gradient(180deg,#eef6ff 0%,#dbeafe 100%);border-top:1px solid #bfdbfe;border-bottom:1px solid #93c5fd}
-    .bs-row-detail-wrap{display:flex;flex-wrap:wrap;gap:1px 4px;align-items:center}
+    .bs-row-detail-wrap{display:flex;flex-wrap:wrap;gap:2px 5px;align-items:center}
     .bs-td-emp{min-width:160px}
-    .bs-emp-code{font-weight:700;color:var(--bs-primary-deep);font-size:13px}
-    .bs-emp-name{font-size:11px;color:var(--bs-muted);margin-top:1px}
-    .bs-ctc-val{font-weight:700;color:var(--bs-text);font-size:13px}
+    .bs-emp-code{font-weight:700;color:var(--bs-primary-deep);font-size:15px}
+    .bs-emp-name{font-size:12px;color:var(--bs-muted);margin-top:1px}
+    .bs-ctc-val{font-weight:700;color:var(--bs-text);font-size:15px}
     .bs-structure-line{font-size:12px;font-weight:700;color:var(--bs-cyan);line-height:1.4}
     .bs-structure-meta{font-size:10px;line-height:1.2}
     .bs-structure-warning{margin-top:4px;padding:3px 8px;border-radius:999px;background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;font-size:10px;font-weight:700;display:inline-flex}
@@ -3786,45 +3782,46 @@ function inject_bs_styles() {
     .bs-adjust-chip-deduction .bs-adjust-chip-label,.bs-adjust-chip-deduction .bs-adjust-input{color:#b91c1c}
     .bs-adjust-input-auto{cursor:default;opacity:.95;font-weight:400}
     .bs-adjust-summary{display:flex;flex-direction:column;gap:4px}
-    .bs-adjust-summary-chip{display:inline-flex;align-items:center;justify-content:center;padding:1px 6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;font-size:9px;font-weight:700}
+    .bs-adjust-summary-chip{display:inline-flex;align-items:center;justify-content:center;padding:1px 6px;border-radius:6px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;font-size:10px;font-weight:700}
     .bs-adjust-summary-empty{font-size:11px;color:var(--bs-muted)}
 
     /* OT inputs */
     .bs-td-overtime{vertical-align:top}
     .bs-ot-row{display:flex;gap:3px;align-items:center;flex-wrap:nowrap}
-    .bs-piece-stack{display:flex;flex-direction:column;gap:2px}
-    .bs-piece-line{display:flex;gap:2px;align-items:center}
+    .bs-piece-stack{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
+    .bs-piece-line{display:grid;grid-template-columns:16px 54px 54px 54px;gap:3px;align-items:center}
     .bs-piece-check{width:14px;height:14px;margin:0 2px 0 0}
-    .bs-piece-input{width:58px}
+    .bs-piece-input{width:54px}
     .bs-piece-readonly{background:#f8fafc;color:#64748b;border-color:#dbe4f0}
-    .bs-piece-total{width:92px;background:#fffdf6;color:#b45309;border-color:#fdba74}
-    .bs-ot-amount-row{margin-top:1px}
+    .bs-piece-total{width:54px;background:#fffdf6;color:#b45309;border-color:#fdba74}
+    .bs-ot-amount-row{margin-top:1px;padding-left:19px}
     .bs-ot-amount{display:inline-flex;align-items:center;white-space:nowrap;font-size:9px;font-weight:700;color:var(--bs-amber);background:#fffaf2;border:1px solid #fdba74;border-radius:3px;padding:0 6px;min-height:18px}
-    .bs-piece-total-pill{background:#fffaf2;border-color:#fdba74;width:212px;min-width:212px;justify-content:center;margin-left:18px}
+    .bs-piece-total-pill{background:#fffaf2;border-color:#fdba74;width:168px;min-width:168px;justify-content:center;margin-left:0}
     .bs-select-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer;min-height:28px}
     .bs-date-sm{min-width:132px}
     .bs-floating-field .form-control{min-height:28px;height:28px;padding:3px 8px;border-radius:4px;font-size:12px}
     .bs-floating-field .control-input-wrapper input{min-height:28px;height:28px;padding:3px 8px;border-radius:4px;font-size:12px}
     .bs-floating-field .awesomplete input{min-height:28px;height:28px;padding:3px 8px;border-radius:4px;font-size:12px}
-    .bs-input-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:2px;padding:1px 5px;font-size:10px;width:56px;min-height:20px;height:20px}
+    .bs-input-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:2px;padding:1px 5px;font-size:11px;width:56px;min-height:22px;height:22px}
     .bs-adjust-input{width:116px;height:18px;border-radius:2px;padding:0 5px;text-align:left;background:transparent;font-weight:400}
     .bs-adjust-input::placeholder{color:currentColor;opacity:.85;font-size:9px}
     .bs-input-sm[type=number]::-webkit-outer-spin-button,.bs-input-sm[type=number]::-webkit-inner-spin-button,.bs-adv-input[type=number]::-webkit-outer-spin-button,.bs-adv-input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
     .bs-input-sm[type=number],.bs-adv-input[type=number]{-moz-appearance:textfield;appearance:textfield}
     .bs-input-sm:focus,.bs-select-sm:focus{outline:none;border-color:#93c5fd;box-shadow:0 0 0 3px rgba(59,130,246,.12)}
-    .bs-money-main{font-size:13px;font-weight:800;line-height:1.1}
+    .bs-money-main{font-size:15px;font-weight:800;line-height:1.1}
     .bs-money-gross{color:var(--bs-cyan)}
     .bs-money-net{color:var(--bs-green)}
     .bs-money-sub{font-size:9.5px;color:var(--bs-muted);margin-top:2px}
 
     /* Advances */
-    .bs-adv-wrap{display:flex;flex-direction:column;gap:5px;align-items:flex-start}
-    .bs-adv-row{display:flex;align-items:center;justify-content:flex-start;gap:6px;flex-wrap:nowrap}
+    .bs-adv-wrap{display:flex;flex-direction:column;gap:4px;align-items:flex-start;width:100%}
+    .bs-adv-row{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:2px}
+    .bs-adv-stack{display:flex;flex-direction:column;align-items:flex-start;gap:1px}
     .bs-adv-id{font-size:11px;font-family:monospace;color:var(--bs-primary-deep);min-width:80px}
-    .bs-adv-bal{font-size:11px;color:var(--bs-muted);min-width:90px;text-align:left}
+    .bs-adv-bal{font-size:11px;color:var(--bs-muted);min-width:86px;text-align:left}
     .bs-adv-input{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:6px;padding:3px 7px;font-size:12px}
     .bs-adv-input:focus{outline:none;border-color:#fbbf24;box-shadow:0 0 0 3px rgba(251,191,36,.14)}
-    .bs-adv-total{font-size:11px;color:var(--bs-muted);padding-top:2px;text-align:left}
+    .bs-adv-total{font-size:11px;color:var(--bs-muted);padding-top:1px;text-align:left}
 
     /* Badges & pills */
     .bs-pill{background:var(--bs-primary-soft);color:var(--bs-primary-deep);border:1px solid #bfdbfe;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:700}
@@ -3867,7 +3864,7 @@ function inject_bs_styles() {
 
     /* Payment bar */
     .bs-payment-bar{background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid var(--bs-border);border-radius:var(--bs-radius);padding:14px 18px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:6px;box-shadow:var(--bs-shadow)}
-    @media (max-width: 1280px){.bs-qa-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-source-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-header-card{align-items:flex-start;flex-direction:column}.bs-header-tools{width:100%;justify-content:space-between}.bs-header-period-bar{width:100%}.bs-piece-total-pill{margin-left:18px;width:212px;min-width:212px}}
+    @media (max-width: 1280px){.bs-qa-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-source-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-header-card{align-items:flex-start;flex-direction:column}.bs-header-tools{width:100%;justify-content:space-between}.bs-header-period-bar{width:100%}.bs-piece-total-pill{width:168px;min-width:168px}}
     @media (max-width: 900px){.bs-qa-row,.bs-source-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media (max-width: 768px){.bs-source-row,.bs-qa-row{grid-template-columns:repeat(1,minmax(0,1fr))}}
   `;
