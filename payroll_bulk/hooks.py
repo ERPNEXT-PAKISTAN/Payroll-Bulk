@@ -126,6 +126,7 @@ doc_events = {
 		"after_insert": "payroll_bulk.events.salary_slip.after_insert",
 		"on_submit": "payroll_bulk.events.salary_slip.on_submit",
 		"on_cancel": "payroll_bulk.events.salary_slip.on_cancel",
+		"on_trash": "payroll_bulk.events.salary_slip.on_trash",
 	}
 }
 
@@ -184,7 +185,7 @@ doc_events = {
 # Ignore links to specified DocTypes when deleting documents
 # -----------------------------------------------------------
 
-# ignore_links_on_delete = ["Communication", "ToDo"]
+ignore_links_on_delete = ["Bulk Salary Creation", "Bulk Salary Creation Employee"]
 
 # Request Events
 # ----------------

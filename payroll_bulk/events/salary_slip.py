@@ -19,6 +19,10 @@ def on_cancel(doc: Document, method=None):
 	_sync_salary_slip_links(doc, event="on_cancel")
 
 
+def on_trash(doc: Document, method=None):
+	_sync_salary_slip_links(doc, event="on_trash")
+
+
 def _sync_salary_slip_links(doc: Document, event: str):
 	row_name = doc.get("bulk_salary_creation_employee")
 	batch_name = doc.get("bulk_salary_creation")
@@ -36,6 +40,8 @@ def _sync_salary_slip_links(doc: Document, event: str):
 		row_updates.update({"status": "Submitted", "salary_slip_status": "Submitted", "slip_cancelled_on": None, "error_message": ""})
 	elif event == "on_cancel":
 		row_updates.update({"status": "Cancelled", "salary_slip_status": "Cancelled", "slip_cancelled_on": frappe.utils.now_datetime(), "error_message": "Salary Slip cancelled from Salary Slip document."})
+	elif event == "on_trash":
+		row_updates.update({"salary_slip": "", "status": "Pending", "salary_slip_status": "", "slip_cancelled_on": None, "error_message": ""})
 	frappe.db.set_value("Bulk Salary Creation Employee", row_name, row_updates, update_modified=False)
 	_update_batch_summary(batch_name)
 

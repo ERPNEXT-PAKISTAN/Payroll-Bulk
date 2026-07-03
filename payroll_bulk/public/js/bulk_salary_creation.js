@@ -1447,9 +1447,15 @@ function bs_render_table() {
         <div class="bs-status-sub">${r.salary_slip_status || "Not Created"}${r.payment_status ? ` • ${r.payment_status}` : ""}</div>
       </div>`;
     const can_pay_row = r.salary_slip && r.salary_slip_status === "Submitted" && !r.payment_entry;
+    const can_delete_draft = r.salary_slip && r.salary_slip_status === "Draft";
+    const can_cancel_unlink = r.salary_slip && r.salary_slip_status === "Submitted";
+    const can_unlink_existing = r.salary_slip && !r.salary_slip_status && r.status === "Skipped";
     const action_html = `
       <div class="bs-row-actions">
         ${r.salary_slip ? `<button class="bs-btn-ghost bs-btn-sm" onclick="bs_open_doc('Salary Slip','${r.salary_slip}')">Open Slip</button>` : ""}
+        ${can_delete_draft ? `<button class="bs-btn-ghost bs-btn-sm" onclick="bs_manage_salary_slip(${r._id},'delete_draft')">Delete Draft</button>` : ""}
+        ${can_cancel_unlink ? `<button class="bs-btn-ghost bs-btn-sm" onclick="bs_manage_salary_slip(${r._id},'cancel_unlink')">Cancel Slip</button>` : ""}
+        ${can_unlink_existing ? `<button class="bs-btn-ghost bs-btn-sm" onclick="bs_manage_salary_slip(${r._id},'unlink')">Unlink Slip</button>` : ""}
         ${can_pay_row ? `<button class="bs-btn-ghost bs-btn-sm" onclick="bs_create_single_payment('${r.employee}')">💳 Pay</button>` : ""}
         ${r.payment_entry ? `<button class="bs-btn-ghost bs-btn-sm" onclick="bs_open_doc('Journal Entry','${r.payment_entry}')">Open Journal</button>` : ""}
         ${(r.salary_slip || r.payment_entry) ? `<button class="bs-btn-ghost bs-btn-sm" onclick="bs_refresh_row_status(${r._id})">Refresh</button>` : ""}
@@ -1683,6 +1689,59 @@ function bs_match_row_filter(row, filter, query="") {
 window.bs_remove_row = (id) => {
   window._bs.rows = window._bs.rows.filter((r) => r._id !== id);
   bs_render_table();
+};
+
+window.bs_manage_salary_slip = async (id, action) => {
+  const frm = window._bs.frm;
+  const row = (window._bs.rows || []).find((r) => r._id === id);
+  if (!row || !row.row_name || !row.salary_slip) return;
+
+  const labels = {
+    delete_draft: "Delete Draft Slip",
+    cancel_unlink: "Cancel & Unlink Slip",
+    unlink: "Unlink Existing Slip",
+  };
+  const prompts = {
+    delete_draft: `Delete draft Salary Slip ${row.salary_slip}?`,
+    cancel_unlink: `Cancel and unlink Salary Slip ${row.salary_slip}?`,
+    unlink: `Unlink Salary Slip ${row.salary_slip} from this batch row?`,
+  };
+
+  frappe.confirm(prompts[action] || "Continue?", async () => {
+    frappe.dom.freeze(labels[action] || "Updating Salary Slip...");
+    try {
+      await bs_call("payroll_bulk.api.unlink_bulk_salary_slip", {
+        batch_name: frm.doc.name,
+        row_name: row.row_name,
+        action,
+      });
+      row.salary_slip = "";
+      row.salary_slip_status = "";
+      row.status = "Pending";
+      row.payment_entry = "";
+      row.error_message = "";
+      row.slip_cancelled_on = "";
+      const child = bs_find_child_row(frm, row);
+      if (child) {
+        child.salary_slip = "";
+        child.salary_slip_status = "";
+        child.status = "Pending";
+        child.payment_entry = "";
+        child.error_message = "";
+        child.slip_cancelled_on = "";
+      }
+      bs_sync_to_frm(frm);
+      await new Promise((res, rej) => frm.save("Save", (r) => r.exc ? rej(new Error(r.exc)) : res(r)));
+      await bs_refresh_all_statuses();
+      bs_render_table();
+      bs_render_live_summary(frm);
+      frappe.show_alert({ message: labels[action] || "Salary Slip updated.", indicator: "green" }, 4);
+    } catch (error) {
+      frappe.msgprint({ title: "Salary Slip Action Error", message: error.message || String(error), indicator: "red" });
+    } finally {
+      frappe.dom.unfreeze();
+    }
+  });
 };
 
 window.bs_handle_edit_keydown = (event, element) => {

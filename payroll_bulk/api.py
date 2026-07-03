@@ -852,6 +852,69 @@ def _cancel_or_delete_existing_slip(slip_name: str):
 			_update_batch_summary(batch_name)
 
 
+def _reset_batch_row_link(row_name: str, status: str = "Pending", salary_slip_status: str = "", error_message: str = ""):
+	if row_name and frappe.db.exists("Bulk Salary Creation Employee", row_name):
+		frappe.db.set_value(
+			"Bulk Salary Creation Employee",
+			row_name,
+			{
+				"salary_slip": "",
+				"salary_slip_status": salary_slip_status,
+				"status": status,
+				"error_message": error_message,
+				"payment_entry": "",
+			},
+			update_modified=False,
+		)
+
+
+def _clear_salary_slip_bulk_links(slip):
+	updates = {}
+	for fieldname in ("bulk_salary_creation", "bulk_salary_creation_employee"):
+		if slip.meta.get_field(fieldname):
+			updates[fieldname] = ""
+	if updates:
+		frappe.db.set_value("Salary Slip", slip.name, updates, update_modified=False)
+
+
+@frappe.whitelist()
+def unlink_bulk_salary_slip(batch_name: str, row_name: str, action: str = "unlink"):
+	row = frappe.get_doc("Bulk Salary Creation Employee", row_name)
+	if row.parent != batch_name:
+		frappe.throw(_("Employee row {0} does not belong to batch {1}.").format(row_name, batch_name))
+	if not row.salary_slip:
+		return {"ok": True, "message": _("No Salary Slip linked.")}
+
+	slip = frappe.get_doc("Salary Slip", row.salary_slip)
+	if action == "delete_draft":
+		if slip.docstatus != 0:
+			frappe.throw(_("Only Draft Salary Slips can be deleted from Bulk Salary Creation."))
+		_clear_salary_slip_bulk_links(slip)
+		_reset_batch_row_link(row_name)
+		frappe.delete_doc("Salary Slip", slip.name, force=1, ignore_permissions=True)
+	elif action == "cancel_unlink":
+		if slip.docstatus != 1:
+			frappe.throw(_("Only Submitted Salary Slips can be cancelled from Bulk Salary Creation."))
+		if slip.get("journal_entry"):
+			frappe.throw(_("Cancel accrual Journal Entry {0} first.").format(slip.journal_entry))
+		if slip.get("payment_entry"):
+			frappe.throw(_("Cancel payment reference {0} first.").format(slip.payment_entry))
+		slip.cancel()
+		_clear_salary_slip_bulk_links(slip)
+		_reset_batch_row_link(row_name)
+	elif action == "unlink":
+		_clear_salary_slip_bulk_links(slip)
+		_reset_batch_row_link(row_name)
+	else:
+		frappe.throw(_("Unsupported action {0}.").format(action))
+
+	if batch_name and frappe.db.exists("Bulk Salary Creation", batch_name):
+		from payroll_bulk.events.salary_slip import _update_batch_summary
+		_update_batch_summary(batch_name)
+
+	return {"ok": True, "message": _("Salary Slip link updated."), "action": action, "salary_slip": slip.name}
+
+
 def _replace_salary_slip_rows(target_slip, source_slip):
 	for parentfield in ("earnings", "deductions"):
 		frappe.db.delete("Salary Detail", {"parent": target_slip.name, "parentfield": parentfield})
