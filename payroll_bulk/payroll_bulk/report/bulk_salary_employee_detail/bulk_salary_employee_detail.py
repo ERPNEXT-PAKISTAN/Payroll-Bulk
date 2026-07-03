@@ -14,7 +14,7 @@ def execute(filters=None):
 		{"label": "Salary Structure", "fieldname": "salary_structure", "fieldtype": "Link", "options": "Salary Structure", "width": 160},
 		{"label": "Salary Slip", "fieldname": "salary_slip", "fieldtype": "Link", "options": "Salary Slip", "width": 150},
 		{"label": "Slip Status", "fieldname": "salary_slip_status", "fieldtype": "Data", "width": 100},
-		{"label": "Payment Entry", "fieldname": "payment_entry", "fieldtype": "Link", "options": "Payment Entry", "width": 150},
+		{"label": "Payment Journal Entry", "fieldname": "payment_entry", "fieldtype": "Link", "options": "Journal Entry", "width": 150},
 		{"label": "Payment Status", "fieldname": "payment_status", "fieldtype": "Data", "width": 110},
 		{"label": "Gross Pay", "fieldname": "gross_pay", "fieldtype": "Currency", "width": 110},
 		{"label": "Net Pay", "fieldname": "net_pay", "fieldtype": "Currency", "width": 110},

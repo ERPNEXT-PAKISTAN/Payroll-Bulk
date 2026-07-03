@@ -1,3 +1,5 @@
+import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -5,6 +7,12 @@ class BulkSalaryCreation(Document):
 	def validate(self):
 		if self.calculation_mode == "Per Piece Qty":
 			self.calculation_mode = "Per Piece or Per Hour"
+		self._remove_blank_employee_rows()
+		self._remove_blank_component_rows()
+		if not self.get("employees"):
+			frappe.throw(_("Add at least one employee before saving."))
+
+	def before_save(self):
 		self._remove_blank_employee_rows()
 		self._remove_blank_component_rows()
 

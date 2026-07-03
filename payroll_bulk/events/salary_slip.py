@@ -40,6 +40,10 @@ def _sync_salary_slip_links(doc: Document, event: str):
 		row_updates.update({"status": "Submitted", "salary_slip_status": "Submitted", "slip_cancelled_on": None, "error_message": ""})
 	elif event == "on_cancel":
 		row_updates.update({"status": "Cancelled", "salary_slip_status": "Cancelled", "slip_cancelled_on": frappe.utils.now_datetime(), "error_message": "Salary Slip cancelled from Salary Slip document."})
+		if batch_name and doc.employee:
+			from payroll_bulk.api import _cancel_batch_additional_salaries
+
+			_cancel_batch_additional_salaries(batch_name, employee=doc.employee)
 	elif event == "on_trash":
 		row_updates.update({"salary_slip": "", "status": "Pending", "salary_slip_status": "", "slip_cancelled_on": None, "error_message": ""})
 	frappe.db.set_value("Bulk Salary Creation Employee", row_name, row_updates, update_modified=False)

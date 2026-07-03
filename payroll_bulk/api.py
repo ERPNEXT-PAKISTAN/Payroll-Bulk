@@ -9,6 +9,68 @@ from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
 	get_accounting_dimensions,
 )
 from hrms.payroll.doctype.payroll_entry.payroll_entry import PayrollEntry
+from hrms.utils.holiday_list import get_holiday_list_for_employee
+
+
+def _resolve_default_holiday_list(company: str) -> str | None:
+	holiday_list = frappe.db.get_value("Company", company, "default_holiday_list")
+	if holiday_list:
+		return holiday_list
+
+	for employee in frappe.get_all(
+		"Employee", filters={"company": company, "status": "Active"}, pluck="name", limit_page_length=200
+	):
+		existing = get_holiday_list_for_employee(employee, raise_exception=False)
+		if existing:
+			return existing if isinstance(existing, str) else existing.get("holiday_list")
+
+	if frappe.db.exists("Holiday List", "Company Holidays"):
+		return "Company Holidays"
+
+	return frappe.db.get_value("Holiday List", {}, "name", order_by="creation desc")
+
+
+def _ensure_holiday_list_for_employee(
+	employee: str, as_on: str | None = None, assign_from: str | None = None
+) -> str | None:
+	"""Assign a company holiday list when the employee has none (avoids slip creation failures)."""
+	check_dates = [getdate(as_on or frappe.utils.today())]
+	if assign_from:
+		check_dates.insert(0, getdate(assign_from))
+
+	for check_date in check_dates:
+		existing = get_holiday_list_for_employee(employee, as_on=check_date, raise_exception=False)
+		if existing:
+			return existing if isinstance(existing, str) else existing.get("holiday_list")
+
+	company = frappe.db.get_value("Employee", employee, "company")
+	holiday_list = _resolve_default_holiday_list(company)
+	if not holiday_list:
+		return None
+
+	doc = frappe.get_doc(
+		{
+			"doctype": "Holiday List Assignment",
+			"naming_series": "HR-HLA-.YYYY.-",
+			"applicable_for": "Employee",
+			"assigned_to": employee,
+			"holiday_list": holiday_list,
+			"from_date": min(check_dates),
+		}
+	)
+	doc.insert(ignore_permissions=True)
+	doc.submit()
+	return holiday_list
+
+
+def _validate_employee_holiday_list(employee: str, start_date: str, end_date: str | None = None):
+	end_date = end_date or start_date
+	if not _ensure_holiday_list_for_employee(employee, as_on=end_date, assign_from=start_date):
+		frappe.throw(
+			_(
+				"No Holiday List is assigned for {0} for payroll period {1} to {2}. Assign one via Holiday List Assignment or set Default Holiday List on the company."
+			).format(employee, frappe.utils.formatdate(start_date), frappe.utils.formatdate(end_date))
+		)
 
 
 def _validate_field(meta, fieldname: str) -> str:
@@ -832,6 +894,7 @@ def _cancel_or_delete_existing_slip(slip_name: str):
 		)
 	if slip.docstatus == 1:
 		slip.cancel()
+		_cancel_batch_additional_salaries(batch_name, employee=slip.employee)
 	else:
 		if row_name and frappe.db.exists("Bulk Salary Creation Employee", row_name):
 			frappe.db.set_value(
@@ -846,6 +909,8 @@ def _cancel_or_delete_existing_slip(slip_name: str):
 				update_modified=False,
 			)
 		frappe.delete_doc("Salary Slip", slip.name, force=1, ignore_permissions=True)
+		if batch_name:
+			_cancel_batch_additional_salaries(batch_name, employee=slip.employee)
 		if batch_name and frappe.db.exists("Bulk Salary Creation", batch_name):
 			from payroll_bulk.events.salary_slip import _update_batch_summary
 
@@ -891,6 +956,7 @@ def unlink_bulk_salary_slip(batch_name: str, row_name: str, action: str = "unlin
 			frappe.throw(_("Only Draft Salary Slips can be deleted from Bulk Salary Creation."))
 		_clear_salary_slip_bulk_links(slip)
 		_reset_batch_row_link(row_name)
+		_cancel_batch_additional_salaries(batch_name, employee=row.employee)
 		frappe.delete_doc("Salary Slip", slip.name, force=1, ignore_permissions=True)
 	elif action == "cancel_unlink":
 		if slip.docstatus != 1:
@@ -900,6 +966,7 @@ def unlink_bulk_salary_slip(batch_name: str, row_name: str, action: str = "unlin
 		if slip.get("payment_entry"):
 			frappe.throw(_("Cancel payment reference {0} first.").format(slip.payment_entry))
 		slip.cancel()
+		_cancel_batch_additional_salaries(batch_name, employee=row.employee)
 		_clear_salary_slip_bulk_links(slip)
 		_reset_batch_row_link(row_name)
 	elif action == "unlink":
@@ -992,24 +1059,87 @@ def _structure_needs_base_fallback(structure_doc) -> bool:
 	return True
 
 
-def _calculate_batch_base_amount(row, calculation_mode: str | None = None) -> float:
+def _manual_base_amount(row, manual_salary_basis: str | None, ctc: float, daily: float) -> float:
+	basis = manual_salary_basis or "Full Month"
+	if basis == "By Payment Days":
+		days = flt(row.get("payment_days"))
+		return flt(daily * days) if days else ctc
+	if basis == "Deduct Absent Days":
+		absent = flt(row.get("absent_days"))
+		return flt(daily * max(0, 30 - absent)) if absent else ctc
+	return ctc
+
+
+def _calculate_batch_base_amount(
+	row,
+	calculation_mode: str | None = None,
+	manual_salary_basis: str | None = None,
+	overtime_with_salary: int | bool = 0,
+) -> float:
+	ctc = flt(row.get("ctc"))
+	daily = flt(ctc / 30) if ctc else 0
+
+	if calculation_mode in ("Attendance Based", "Checkin Based"):
+		days = flt(row.get("payment_days")) or flt(row.get("attendance_days"))
+		return flt(daily * days) if days else 0
+
 	if calculation_mode == "Per Piece or Per Hour":
-		ctc = flt(row.get("ctc"))
+		if cint(overtime_with_salary):
+			return _manual_base_amount(row, manual_salary_basis, ctc, daily)
 		hourly_rate = flt(ctc / 30 / 8) if ctc else 0
 		return flt(hourly_rate * flt(row.get("source_hours")) + flt(row.get("source_qty")) * flt(row.get("piece_rate")))
 
-	payment_days = flt(row.get("payment_days"))
-	ctc = flt(row.get("ctc"))
-	if payment_days and payment_days < 30:
-		return flt(ctc / 30 * payment_days)
-	if payment_days and payment_days >= 30:
-		return ctc
-	attendance_days = flt(row.get("attendance_days"))
-	if attendance_days and attendance_days < 30:
-		return flt(ctc / 30 * attendance_days)
-	if attendance_days and attendance_days >= 30:
-		return ctc
-	return ctc
+	return _manual_base_amount(row, manual_salary_basis, ctc, daily)
+
+
+def _ensure_row_attendance_loaded(row, batch, options: dict):
+	mode = batch.calculation_mode or "Manual"
+	manual_basis = batch.get("manual_salary_basis") or "Full Month"
+	needs_attendance = mode in ("Attendance Based", "Checkin Based") or (
+		mode == "Manual" and manual_basis in ("By Payment Days", "Deduct Absent Days")
+	)
+	if not needs_attendance:
+		return
+	if flt(row.payment_days) or flt(row.attendance_days):
+		return
+
+	source = "Employee Checkin" if mode == "Checkin Based" else "Attendance"
+	values = get_bulk_attendance_values([row.employee], source, options["start_date"], options["end_date"])
+	item = values.get(row.employee) or {}
+	if not any(flt(item.get(field)) for field in ("attendance_days", "payment_days", "absent_days")):
+		return
+
+	updates = {
+		"attendance_days": item.get("attendance_days") or 0,
+		"absent_days": item.get("absent_days") or 0,
+		"attendance_hours": item.get("attendance_hours") or 0,
+		"payment_days": item.get("payment_days") or 0,
+	}
+	frappe.db.set_value("Bulk Salary Creation Employee", row.name, updates, update_modified=False)
+	for field, value in updates.items():
+		row.set(field, value)
+
+
+def _cancel_batch_additional_salaries(batch_name: str, employee: str | None = None):
+	"""Cancel or delete Additional Salary rows linked to a bulk batch."""
+	filters = {
+		"ref_doctype": "Bulk Salary Creation",
+		"ref_docname": batch_name,
+		"docstatus": ["<", 2],
+	}
+	if employee:
+		filters["employee"] = employee
+
+	cancelled = 0
+	for name in frappe.get_all("Additional Salary", filters=filters, pluck="name"):
+		doc = frappe.get_doc("Additional Salary", name)
+		if doc.docstatus == 1:
+			doc.cancel()
+			cancelled += 1
+		elif doc.docstatus == 0:
+			frappe.delete_doc("Additional Salary", doc.name, force=1, ignore_permissions=True)
+			cancelled += 1
+	return cancelled
 
 
 def _get_existing_additional_salaries(employee: str, payroll_date: str, component: str, batch_name: str):
@@ -1073,8 +1203,19 @@ def _upsert_additional_salary(
 	return additional_salary.name
 
 
-def _create_base_additional_salary_if_needed(row, assignment, company, start_date, end_date, posting_date, batch_name, calculation_mode: str | None = None):
-	if calculation_mode == "Per Piece or Per Hour":
+def _create_base_additional_salary_if_needed(
+	row,
+	assignment,
+	company,
+	start_date,
+	end_date,
+	posting_date,
+	batch_name,
+	calculation_mode: str | None = None,
+	manual_salary_basis: str | None = None,
+	overtime_with_salary: int | bool = 0,
+):
+	if calculation_mode == "Per Piece or Per Hour" and not cint(overtime_with_salary):
 		return
 
 	structure_doc = frappe.get_cached_doc("Salary Structure", assignment.salary_structure)
@@ -1082,7 +1223,9 @@ def _create_base_additional_salary_if_needed(row, assignment, company, start_dat
 		return
 
 	base_component = _guess_base_component(structure_doc)
-	base_amount = _calculate_batch_base_amount(row, calculation_mode)
+	base_amount = _calculate_batch_base_amount(
+		row, calculation_mode, manual_salary_basis, overtime_with_salary
+	)
 	if not base_component or base_amount <= 0:
 		return
 
@@ -1106,6 +1249,56 @@ def _get_batch_component_entries(batch_name: str, row_name: str, employee: str):
 
 
 @frappe.whitelist()
+def sync_bulk_batch_slip_status(batch_name: str):
+	"""Reconcile batch employee rows with actual Salary Slip docstatus."""
+	from payroll_bulk.events.salary_slip import _update_batch_summary
+
+	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
+		frappe.throw(_("Bulk Salary Creation {0} not found.").format(batch_name))
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	updated = []
+	for row in batch.employees:
+		if not row.salary_slip or not frappe.db.exists("Salary Slip", row.salary_slip):
+			continue
+		slip = frappe.db.get_value(
+			"Salary Slip",
+			row.salary_slip,
+			["docstatus", "gross_pay", "net_pay", "status"],
+			as_dict=True,
+		)
+		if not slip:
+			continue
+		if slip.docstatus == 1:
+			status, slip_status = "Submitted", "Submitted"
+		elif slip.docstatus == 0:
+			status, slip_status = "Slip Created", "Draft"
+		else:
+			status, slip_status = "Cancelled", "Cancelled"
+
+		if row.status == status and row.salary_slip_status == slip_status:
+			continue
+
+		frappe.db.set_value(
+			"Bulk Salary Creation Employee",
+			row.name,
+			{
+				"status": status,
+				"salary_slip_status": slip_status,
+				"gross_pay": slip.gross_pay,
+				"net_pay": slip.net_pay,
+				"error_message": "",
+			},
+			update_modified=False,
+		)
+		updated.append(row.employee)
+
+	_update_batch_summary(batch_name)
+	frappe.db.commit()
+	return {"updated_count": len(updated), "updated_employees": updated}
+
+
+@frappe.whitelist()
 def sync_bulk_row_additional_salaries(
 	batch_name: str,
 	row_name: str,
@@ -1119,11 +1312,24 @@ def sync_bulk_row_additional_salaries(
 	if row.parent != batch_name:
 		frappe.throw(_("Employee row {0} does not belong to batch {1}.").format(row_name, batch_name))
 
+	batch = frappe.get_cached_doc("Bulk Salary Creation", batch_name)
+	calculation_mode = batch.calculation_mode or "Manual"
+	manual_salary_basis = batch.get("manual_salary_basis") or "Full Month"
+	overtime_with_salary = batch.get("overtime_with_salary") or 0
 	assignment = _get_salary_structure_assignment(row.employee, payroll_frequency, start_date, end_date)
 	structure_doc = frappe.get_cached_doc("Salary Structure", assignment.salary_structure)
 
 	_create_base_additional_salary_if_needed(
-		row, assignment, company, start_date, end_date, posting_date, batch_name
+		row,
+		assignment,
+		company,
+		start_date,
+		end_date,
+		posting_date,
+		batch_name,
+		calculation_mode,
+		manual_salary_basis,
+		overtime_with_salary,
 	)
 	_upsert_additional_salary(
 		row,
@@ -1189,8 +1395,19 @@ def create_bulk_salary_slip(
 	if cancel_existing and row.salary_slip:
 		_cancel_or_delete_existing_slip(row.salary_slip)
 
-	assignment = _get_salary_structure_assignment(row.employee, payroll_frequency, start_date, end_date)
 	batch = frappe.get_cached_doc("Bulk Salary Creation", batch_name)
+	_validate_employee_holiday_list(row.employee, start_date, end_date)
+	sync_bulk_row_additional_salaries(
+		batch_name=batch_name,
+		row_name=row_name,
+		company=company,
+		start_date=start_date,
+		end_date=end_date,
+		posting_date=posting_date,
+		payroll_frequency=payroll_frequency,
+	)
+
+	assignment = _get_salary_structure_assignment(row.employee, payroll_frequency, start_date, end_date)
 	calculation_mode = batch.calculation_mode or "Manual"
 	ctc = flt(ctc or row.get("ctc"))
 	if calculation_mode != "Per Piece or Per Hour" and flt(assignment.base) <= 0 and ctc > 0:
@@ -1242,7 +1459,13 @@ def create_bulk_salary_slip(
 		_replace_salary_slip_rows(slip, preview_slip)
 
 	if cint(submit_slip):
-		slip.submit()
+		try:
+			slip.submit()
+		except Exception:
+			slip.reload()
+			if slip.docstatus != 1:
+				raise
+			frappe.log_error(title=f"Bulk Salary Slip post-submit warning ({slip.name})")
 	else:
 		slip.reload()
 
@@ -1260,4 +1483,309 @@ def create_bulk_salary_slip(
 		"total_working_days": slip.total_working_days,
 		"earnings_count": len(slip.earnings or []),
 		"deductions_count": len(slip.deductions or []),
+	}
+
+
+@frappe.whitelist()
+def reprocess_bulk_salary_row(
+	batch_name: str,
+	row_name: str,
+	submit_slip: int | bool = 0,
+	cancel_existing: int | bool = 1,
+):
+	"""Cancel linked Additional Salary + slip, then recreate salary slip for one row."""
+	row = frappe.get_doc("Bulk Salary Creation Employee", row_name)
+	if row.parent != batch_name:
+		frappe.throw(_("Employee row {0} does not belong to batch {1}.").format(row_name, batch_name))
+
+	batch = frappe.get_cached_doc("Bulk Salary Creation", batch_name)
+	if cint(cancel_existing):
+		if row.salary_slip:
+			_cancel_or_delete_existing_slip(row.salary_slip)
+		else:
+			_cancel_batch_additional_salaries(batch_name, employee=row.employee)
+
+	sync_bulk_row_additional_salaries(
+		batch_name=batch_name,
+		row_name=row_name,
+		company=batch.company,
+		start_date=batch.start_date,
+		end_date=batch.end_date,
+		posting_date=batch.posting_date,
+		payroll_frequency=batch.payroll_frequency or "Monthly",
+	)
+	result = create_bulk_salary_slip(
+		batch_name=batch_name,
+		row_name=row_name,
+		company=batch.company,
+		payroll_frequency=batch.payroll_frequency or "Monthly",
+		start_date=batch.start_date,
+		end_date=batch.end_date,
+		posting_date=batch.posting_date,
+		ctc=row.ctc,
+		submit_slip=cint(submit_slip),
+		cancel_existing=0,
+	)
+	from payroll_bulk.events.salary_slip import _update_batch_summary
+
+	_update_batch_summary(batch_name)
+	return result
+
+
+@frappe.whitelist()
+def process_bulk_batch_rows(batch_name: str, submit_slip: int | bool = 0, replace_existing: int | bool = 0):
+	"""Create salary slips for all pending rows in a batch (server-side helper)."""
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	options = {
+		"company": batch.company,
+		"payroll_frequency": batch.payroll_frequency or "Monthly",
+		"start_date": batch.start_date,
+		"end_date": batch.end_date,
+		"posting_date": batch.posting_date,
+		"submit_slips": cint(submit_slip),
+		"replace_existing_slips": cint(replace_existing),
+		"create_missing_only": 0,
+		"row_names": [row.name for row in batch.employees if row.employee],
+	}
+	return process_bulk_salary_batch(batch_name, options)
+
+
+BULK_BACKGROUND_ROW_THRESHOLD = 20
+
+
+def _parse_bulk_batch_options(options):
+	if isinstance(options, str):
+		options = frappe.parse_json(options)
+	return options or {}
+
+
+def _get_existing_period_salary_slip(employee: str, company: str, start_date: str, end_date: str) -> str | None:
+	return frappe.db.get_value(
+		"Salary Slip",
+		{
+			"employee": employee,
+			"company": company,
+			"start_date": start_date,
+			"end_date": end_date,
+			"docstatus": ["<", 2],
+		},
+		"name",
+	)
+
+
+def _set_bulk_job_progress(job_id: str, batch_name: str, processed: int, total: int, error: str | None = None):
+	frappe.cache.set_value(
+		f"bulk_salary_job:{job_id}",
+		{
+			"batch_name": batch_name,
+			"processed_count": processed,
+			"total_count": total,
+			"error": error,
+		},
+		expires_in_sec=86400,
+	)
+
+
+def _process_batch_row(batch_name: str, row_name: str, options: dict):
+	row = frappe.get_doc("Bulk Salary Creation Employee", row_name)
+	if row.parent != batch_name:
+		frappe.throw(_("Employee row {0} does not belong to batch {1}.").format(row_name, batch_name))
+	if not row.employee:
+		frappe.throw(_("Employee is required."))
+	if not flt(row.ctc):
+		frappe.throw(_("CTC is missing."))
+	if row.adv_deduct and row.advance_balance and flt(row.adv_deduct) > flt(row.advance_balance):
+		frappe.throw(_("Advance deduction cannot exceed advance balance."))
+
+	company = options["company"]
+	start_date = options["start_date"]
+	end_date = options["end_date"]
+	posting_date = options["posting_date"]
+	payroll_frequency = options.get("payroll_frequency") or "Monthly"
+	batch = frappe.get_cached_doc("Bulk Salary Creation", batch_name)
+	_validate_employee_holiday_list(row.employee, start_date, end_date)
+	_ensure_row_attendance_loaded(row, batch, options)
+	mode = batch.calculation_mode or "Manual"
+	if mode in ("Attendance Based", "Checkin Based"):
+		days = flt(row.payment_days) or flt(row.attendance_days)
+		if not days:
+			frappe.throw(
+				_("No attendance/checkin days found for {0} in this period. Mark attendance or load source data first.").format(
+					row.employee
+				)
+			)
+	existing = _get_existing_period_salary_slip(row.employee, company, start_date, end_date)
+
+	if existing and not cint(options.get("replace_existing_slips")):
+		slip_docstatus = frappe.db.get_value("Salary Slip", existing, "docstatus")
+		if slip_docstatus == 0 and cint(options.get("submit_slips")):
+			slip = frappe.get_doc("Salary Slip", existing)
+			try:
+				slip.submit()
+			except Exception:
+				slip.reload()
+				if slip.docstatus != 1:
+					raise
+				frappe.log_error(title=f"Bulk Salary Slip post-submit warning ({existing})")
+			frappe.db.set_value(
+				"Bulk Salary Creation Employee",
+				row_name,
+				{
+					"salary_slip": existing,
+					"status": "Submitted",
+					"error_message": "",
+					"salary_slip_status": "Submitted",
+					"gross_pay": slip.gross_pay,
+					"net_pay": slip.net_pay,
+				},
+				update_modified=False,
+			)
+			return {"submitted": True, "salary_slip": existing}
+
+		salary_slip_status = "Submitted" if slip_docstatus == 1 else "Draft"
+		status = "Skipped"
+		message = (
+			"Skipped because Salary Slip already exists."
+			if cint(options.get("create_missing_only"))
+			else "Linked existing Salary Slip for this period."
+		)
+		frappe.db.set_value(
+			"Bulk Salary Creation Employee",
+			row_name,
+			{
+				"salary_slip": existing,
+				"status": status,
+				"error_message": message,
+				"salary_slip_status": salary_slip_status,
+			},
+			update_modified=False,
+		)
+		return {"skipped": True, "salary_slip": existing}
+
+	sync_bulk_row_additional_salaries(
+		batch_name=batch_name,
+		row_name=row_name,
+		company=company,
+		start_date=start_date,
+		end_date=end_date,
+		posting_date=posting_date,
+		payroll_frequency=payroll_frequency,
+	)
+	return create_bulk_salary_slip(
+		batch_name=batch_name,
+		row_name=row_name,
+		company=company,
+		payroll_frequency=payroll_frequency,
+		start_date=start_date,
+		end_date=end_date,
+		posting_date=posting_date,
+		ctc=row.ctc,
+		submit_slip=cint(options.get("submit_slips")),
+		cancel_existing=cint(options.get("replace_existing_slips")) and bool(existing),
+	)
+
+
+def process_bulk_salary_batch(batch_name: str, options=None, job_id: str | None = None):
+	from payroll_bulk.events.salary_slip import _update_batch_summary
+
+	options = _parse_bulk_batch_options(options)
+	job_id = job_id or options.get("_job_id")
+	frappe.db.set_value(
+		"Bulk Salary Creation", batch_name, {"processing_status": "Processing"}, update_modified=False
+	)
+	frappe.db.commit()
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	row_names = options.get("row_names") or [row.name for row in batch.employees if row.employee]
+	total = len(row_names)
+	results = {"success": [], "failed": [], "skipped": []}
+
+	for index, row_name in enumerate(row_names, start=1):
+		try:
+			row_result = _process_batch_row(batch_name, row_name, options)
+			if row_result and row_result.get("skipped"):
+				results["skipped"].append(row_name)
+			else:
+				results["success"].append(row_name)
+		except Exception as error:
+			frappe.log_error(title=f"Bulk Salary Batch Row Failed ({batch_name})")
+			row = frappe.get_doc("Bulk Salary Creation Employee", row_name)
+			slip_docstatus = (
+				frappe.db.get_value("Salary Slip", row.salary_slip, "docstatus") if row.salary_slip else None
+			)
+			if slip_docstatus == 1:
+				results["success"].append(row_name)
+				frappe.db.set_value(
+					"Bulk Salary Creation Employee",
+					row_name,
+					{
+						"status": "Submitted",
+						"salary_slip_status": "Submitted",
+						"error_message": str(error)[:200],
+					},
+					update_modified=False,
+				)
+			else:
+				results["failed"].append(row_name)
+				frappe.db.set_value(
+					"Bulk Salary Creation Employee",
+					row_name,
+					{
+						"status": "Failed",
+						"error_message": str(error)[:500],
+						"salary_slip_status": "",
+					},
+					update_modified=False,
+				)
+		if job_id:
+			_set_bulk_job_progress(job_id, batch_name, index, total)
+		frappe.db.commit()
+
+	_update_batch_summary(batch_name)
+	sync_bulk_batch_slip_status(batch_name)
+	return results
+
+
+@frappe.whitelist()
+def enqueue_bulk_salary_batch(batch_name: str, options=None):
+	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
+		frappe.throw(_("Bulk Salary Creation {0} not found.").format(batch_name))
+
+	options = _parse_bulk_batch_options(options)
+	options["user"] = frappe.session.user
+	row_names = options.get("row_names") or []
+	if not row_names:
+		batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+		row_names = [row.name for row in batch.employees if row.employee]
+		options["row_names"] = row_names
+	if not row_names:
+		frappe.throw(_("No employee rows found to process."))
+
+	queued_job_id = frappe.generate_hash(length=12)
+	frappe.enqueue(
+		method="payroll_bulk.api.process_bulk_salary_batch",
+		queue="long",
+		timeout=3600,
+		job_name=f"bulk_salary_{batch_name}",
+		batch_name=batch_name,
+		options={**options, "_job_id": queued_job_id},
+		job_id=queued_job_id,
+	)
+	_set_bulk_job_progress(queued_job_id, batch_name, 0, len(row_names))
+	return {"job_id": queued_job_id, "enqueued": True, "row_count": len(row_names)}
+
+
+@frappe.whitelist()
+def get_bulk_salary_batch_job_status(job_id: str):
+	from frappe.utils.background_jobs import get_job_status
+
+	status = get_job_status(job_id) or "queued"
+	progress = frappe.cache.get_value(f"bulk_salary_job:{job_id}") or {}
+	return {
+		"job_id": job_id,
+		"status": status,
+		"processed_count": progress.get("processed_count", 0),
+		"total_count": progress.get("total_count", 0),
+		"batch_name": progress.get("batch_name"),
+		"error": progress.get("error"),
 	}
