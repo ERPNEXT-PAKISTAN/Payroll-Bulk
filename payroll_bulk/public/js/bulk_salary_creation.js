@@ -690,19 +690,16 @@ function render_main_ui(frm) {
           </div>
           ` : ``}
           ${show_fetch_filters ? `
-          <div class="bs-filter-btn-wrap">
-            <button class="bs-btn-secondary" id="bs-fetch-btn">⬇ Fetch</button>
+          <div class="bs-filter-btn-wrap bs-filter-btn-stack">
+            <button class="bs-btn-secondary bs-filter-action-btn" id="bs-fetch-btn">⬇ Fetch</button>
           </div>
           ` : ``}
           ${show_manual_employee ? `
-          <div class="bs-field-wrap bs-floating-field bs-employee-picker">
+          <div class="bs-field-wrap bs-floating-field bs-employee-picker bs-field-with-top-action">
+            <div class="bs-top-action-wrap"><button class="bs-btn-primary bs-filter-action-btn" id="bs-add-btn">＋ Add</button></div>
             <span class="bs-field-caption">Employee</span><div id="bs-emp-link-wrap"></div>
           </div>
           ` : ``}
-          ${show_manual_employee ? `
-          <div class="bs-filter-btn-wrap">
-            <button class="bs-btn-primary" id="bs-add-btn">＋ Add</button>
-          </div>` : ``}
         </div>
         ` : ``}
         <div id="bs-fetch-notice" style="display:none" class="bs-notice bs-notice-info"></div>
@@ -3682,17 +3679,21 @@ function inject_bs_styles() {
     .bs-collapsible{overflow:hidden;transition:all .18s ease}
     .bs-collapsible.is-collapsed{display:none}
     .bs-mb{margin-bottom:10px}
-    .bs-panel{overflow:visible;background:var(--bs-surface);border:1px solid var(--bs-border);border-radius:10px;padding:6px 8px;box-shadow:var(--bs-shadow)}
+    .bs-panel{overflow:visible;background:var(--bs-surface);border:1px solid var(--bs-border);border-radius:10px;padding:5px 7px;box-shadow:var(--bs-shadow)}
     .bs-panel-soft{background:linear-gradient(180deg,#fcfdff 0%,#f6faff 100%)}
     .bs-head-inline-label{display:inline-flex;align-items:center;padding:0 8px;height:24px;border:1px solid var(--bs-border);border-radius:6px;background:#f8fafc;color:#64748b;font-size:10px;font-weight:700}
-    .bs-qa-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(140px,1fr) minmax(140px,1fr) auto minmax(180px,1.15fr) auto;gap:4px;align-items:end}
+    .bs-qa-row{display:grid;grid-template-columns:minmax(150px,1fr) minmax(150px,1fr) minmax(140px,1fr) minmax(140px,1fr) minmax(100px,.4fr) minmax(180px,1.15fr);gap:4px;align-items:end}
     .bs-config-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
     .bs-source-grid{display:flex;flex-direction:column;gap:4px}
-    .bs-source-row{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;align-items:end}
+    .bs-source-row{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;align-items:end}
     .bs-piece-filter-check{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border:1px solid var(--bs-border);border-radius:6px;background:#fff;color:#475569;font-size:10px;font-weight:700}
     .bs-piece-filter-check input{width:14px;height:14px;margin:0}
     .bs-config-note{font-size:11px;color:var(--bs-muted);margin:4px 0}
     .bs-filter-btn-wrap{display:flex;align-items:flex-end}
+    .bs-filter-btn-stack{align-items:flex-start}
+    .bs-field-with-top-action{display:flex;flex-direction:column;gap:2px}
+    .bs-top-action-wrap{display:flex;justify-content:flex-end}
+    .bs-filter-action-btn{min-width:88px;height:28px}
     .bs-employee-picker{min-width:180px}
     .bs-search-filter-row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:0 0 8px}
     .bs-search-row{flex:1;min-width:280px;margin:0}
@@ -3799,7 +3800,7 @@ function inject_bs_styles() {
     .bs-piece-total{width:92px;background:#fffdf6;color:#b45309;border-color:#fdba74}
     .bs-ot-amount-row{margin-top:1px}
     .bs-ot-amount{display:inline-flex;align-items:center;white-space:nowrap;font-size:9px;font-weight:700;color:var(--bs-amber);background:#fffaf2;border:1px solid #fdba74;border-radius:3px;padding:0 6px;min-height:18px}
-    .bs-piece-total-pill{background:#fffaf2;border-color:#fdba74;min-width:138px;justify-content:center}
+    .bs-piece-total-pill{background:#fffaf2;border-color:#fdba74;width:212px;min-width:212px;justify-content:center;margin-left:18px}
     .bs-select-sm{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:4px;padding:3px 8px;font-size:12px;cursor:pointer;min-height:28px}
     .bs-date-sm{min-width:132px}
     .bs-floating-field .form-control{min-height:28px;height:28px;padding:3px 8px;border-radius:4px;font-size:12px}
@@ -3817,13 +3818,13 @@ function inject_bs_styles() {
     .bs-money-sub{font-size:9.5px;color:var(--bs-muted);margin-top:2px}
 
     /* Advances */
-    .bs-adv-wrap{display:flex;flex-direction:column;gap:5px}
-    .bs-adv-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+    .bs-adv-wrap{display:flex;flex-direction:column;gap:5px;align-items:flex-start}
+    .bs-adv-row{display:flex;align-items:center;justify-content:flex-start;gap:6px;flex-wrap:nowrap}
     .bs-adv-id{font-size:11px;font-family:monospace;color:var(--bs-primary-deep);min-width:80px}
-    .bs-adv-bal{font-size:11px;color:var(--bs-muted);min-width:80px}
+    .bs-adv-bal{font-size:11px;color:var(--bs-muted);min-width:90px;text-align:left}
     .bs-adv-input{background:#fff;border:1px solid var(--bs-border-strong);color:var(--bs-text);border-radius:6px;padding:3px 7px;font-size:12px}
     .bs-adv-input:focus{outline:none;border-color:#fbbf24;box-shadow:0 0 0 3px rgba(251,191,36,.14)}
-    .bs-adv-total{font-size:11px;color:var(--bs-muted);padding-top:2px}
+    .bs-adv-total{font-size:11px;color:var(--bs-muted);padding-top:2px;text-align:left}
 
     /* Badges & pills */
     .bs-pill{background:var(--bs-primary-soft);color:var(--bs-primary-deep);border:1px solid #bfdbfe;border-radius:999px;padding:3px 10px;font-size:11.5px;font-weight:700}
@@ -3866,7 +3867,7 @@ function inject_bs_styles() {
 
     /* Payment bar */
     .bs-payment-bar{background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);border:1px solid var(--bs-border);border-radius:var(--bs-radius);padding:14px 18px;display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-top:6px;box-shadow:var(--bs-shadow)}
-    @media (max-width: 1280px){.bs-qa-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-source-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-header-card{align-items:flex-start;flex-direction:column}.bs-header-tools{width:100%;justify-content:space-between}.bs-header-period-bar{width:100%}}
+    @media (max-width: 1280px){.bs-qa-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-source-row{grid-template-columns:repeat(3,minmax(0,1fr))}.bs-header-card{align-items:flex-start;flex-direction:column}.bs-header-tools{width:100%;justify-content:space-between}.bs-header-period-bar{width:100%}.bs-piece-total-pill{margin-left:18px;width:212px;min-width:212px}}
     @media (max-width: 900px){.bs-qa-row,.bs-source-row{grid-template-columns:repeat(2,minmax(0,1fr))}}
     @media (max-width: 768px){.bs-source-row,.bs-qa-row{grid-template-columns:repeat(1,minmax(0,1fr))}}
   `;
