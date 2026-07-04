@@ -119,7 +119,8 @@ window.bs_print_payslip = function(employee_id) {
 // ─── 14. SINGLE JOURNAL ENTRY ────────────────────────────────────────────────
 async function bs_persist_payment_reference(employee_id, journal_name, payment_status = "Payment Created") {
   const frm = window._bs.frm;
-  const row = window._bs.rows.find((item) => item.employee === employee_id);
+  const row = (window._bs.rows || []).find((item) => item.employee === employee_id)
+    || (frm?.doc?.employees || []).find((item) => item.employee === employee_id);
   if (row) {
     row.payment_entry = journal_name || "";
     row.payment_status = payment_status || "Payment Created";
@@ -127,7 +128,7 @@ async function bs_persist_payment_reference(employee_id, journal_name, payment_s
       row.status = payment_status === "Paid" ? "Completed" : "Payment Created";
     }
   }
-  const child = row ? bs_find_child_row(frm, row) : null;
+  const child = row ? bs_find_child_row(frm, row) : (frm?.doc?.employees || []).find((item) => item.employee === employee_id);
   if (child) {
     child.payment_entry = journal_name || "";
     child.payment_status = payment_status || "Payment Created";
@@ -136,10 +137,22 @@ async function bs_persist_payment_reference(employee_id, journal_name, payment_s
     }
   }
   if (frm) {
-    bs_sync_to_frm(frm);
+    if (typeof bs_sync_to_frm === "function" && (window._bs.rows || []).length) {
+      bs_sync_to_frm(frm);
+    }
     await new Promise((resolve, reject) =>
       frm.save("Save", (r) => (r.exc ? reject(new Error(r.exc)) : resolve(r))),
     );
+  }
+}
+
+async function bs_get_payroll_jv_remark(frm) {
+  if (!frm?.doc?.name) return "Salary payment";
+  try {
+    const res = await bs_call("payroll_bulk.api.get_batch_completed_summary", { batch_name: frm.doc.name });
+    return res.message?.remark || "Salary payment";
+  } catch (error) {
+    return "Salary payment";
   }
 }
 
@@ -199,7 +212,12 @@ window.bs_create_single_payment = function(employee_id) {
       }
       d.hide();
       try {
-        const payable_account = await bs_get_salary_payable_account(result.slip_name, vals.company);
+        const payableRes = await bs_call("payroll_bulk.api.get_salary_payable_account", {
+          slip_name: result.slip_name,
+          batch_name: frm?.doc?.name || "",
+        });
+        const payable_account = payableRes.message;
+        const jv_remark = await bs_get_payroll_jv_remark(frm);
         const pay_from_meta = await bs_call("frappe.client.get_value", {
           doctype: "Account",
           filters: { name: v.pay_from },
@@ -215,7 +233,7 @@ window.bs_create_single_payment = function(employee_id) {
             cheque_no: v.reference_no || "",
             cheque_date: v.payment_date,
             company: vals.company||frappe.defaults.get_default("company"),
-            user_remark: `Salary payment for ${result.employee_name} — Slip ${result.slip_name}`,
+            user_remark: jv_remark,
             accounts: [
               {
                 account: payable_account,
@@ -243,6 +261,10 @@ window.bs_create_single_payment = function(employee_id) {
           btn.style.color = "var(--bs-green)";
         }
         await bs_persist_payment_reference(employee_id, pe.message.name, "Payment Created");
+        if (frm && typeof bs_is_completed_batch === "function" && bs_is_completed_batch(frm.doc)) {
+          window._bs._completed_view_batch = null;
+          render_submitted_view(frm);
+        }
         frappe.show_alert({message:`Journal Entry <b>${pe.message.name}</b> created ✓`,indicator:"green"},5);
       } catch(err) {
         frappe.msgprint({title:"Payment Error",message:err.message||String(err),indicator:"red"});
@@ -275,7 +297,15 @@ async function bs_create_bulk_payment(success_results, pay_from_account, vals) {
     });
     const account_type = pay_from_meta.message?.account_type || "";
     const voucher_type = account_type === "Cash" ? "Cash Entry" : "Bank Entry";
-    const payable_accounts = await Promise.all(eligible_results.map((r) => bs_get_salary_payable_account(r.slip_name, vals.company)));
+    const payable_accounts = await Promise.all(
+      eligible_results.map((r) =>
+        bs_call("payroll_bulk.api.get_salary_payable_account", {
+          slip_name: r.slip_name,
+          batch_name: window._bs.frm?.doc?.name || "",
+        }).then((res) => res.message),
+      ),
+    );
+    const jv_remark = await bs_get_payroll_jv_remark(window._bs.frm);
     const accounts = eligible_results.map((r, idx) => ({
       account: payable_accounts[idx],
       party_type: "Employee",
@@ -297,7 +327,7 @@ async function bs_create_bulk_payment(success_results, pay_from_account, vals) {
         posting_date: frappe.datetime.get_today(),
         cheque_date: frappe.datetime.get_today(),
         company: vals.company||frappe.defaults.get_default("company"),
-        user_remark: `Bulk salary payment — Period: ${vals.start_date} to ${vals.end_date} — ${eligible_results.length} employees`,
+        user_remark: jv_remark,
         accounts,
       },
     });
@@ -311,26 +341,81 @@ async function bs_create_bulk_payment(success_results, pay_from_account, vals) {
   }
 }
 
-async function bs_get_salary_payable_account(slip_name, company) {
-  const refs = await bs_call("frappe.client.get_list", {
-    doctype: "GL Entry",
-    filters: {
-      voucher_type: "Salary Slip",
-      voucher_no: slip_name,
-      company: company || frappe.defaults.get_default("company"),
-      is_cancelled: 0,
-    },
-    fields: ["account", "credit", "credit_in_account_currency"],
-    order_by: "credit_in_account_currency desc, credit desc, creation asc",
-    limit_page_length: 20,
+async function bs_get_salary_payable_account(slip_name, company, batch_name = "") {
+  const res = await bs_call("payroll_bulk.api.get_salary_payable_account", {
+    slip_name,
+    batch_name: batch_name || window._bs.frm?.doc?.name || "",
   });
-  const rows = refs.message || [];
-  const payable = rows.find((row) => flt(row.credit_in_account_currency || row.credit) > 0);
-  if (!payable?.account) {
-    throw new Error(`Could not detect payable account from Salary Slip ${slip_name}.`);
-  }
-  return payable.account;
+  return res.message;
 }
+
+window.bs_create_bulk_payment_completed = function () {
+  const frm = window._bs.frm;
+  if (!frm?.doc?.name) return;
+
+  const unpaid = (frm.doc.employees || []).filter(
+    (row) => row.salary_slip_status === "Submitted" && !row.payment_entry,
+  );
+  if (!unpaid.length) {
+    frappe.show_alert({ message: "All submitted employees are already paid.", indicator: "orange" }, 4);
+    return;
+  }
+
+  const d = new frappe.ui.Dialog({
+    title: `Bulk Payment — ${unpaid.length} employee(s)`,
+    fields: [
+      {
+        fieldtype: "Link",
+        fieldname: "pay_from",
+        options: "Account",
+        label: "Pay From Account",
+        reqd: 1,
+        get_query: () => ({
+          filters: [
+            ["account_type", "in", ["Cash", "Bank"]],
+            ["company", "=", frm.doc.company],
+          ],
+        }),
+      },
+      {
+        fieldtype: "Date",
+        fieldname: "payment_date",
+        label: "Payment Date",
+        reqd: 1,
+        default: frm.doc.posting_date || frappe.datetime.get_today(),
+      },
+      {
+        fieldtype: "HTML",
+        fieldname: "info",
+        options: `<div class="bs-notice bs-notice-info">Creates one payment Journal Entry for all unpaid submitted rows. Total net: <b>${fmt_num(unpaid.reduce((s, r) => s + parseFloat(r.net_pay || 0), 0))}</b></div>`,
+      },
+    ],
+    primary_action_label: "Create Payment JE",
+    async primary_action(values) {
+      d.hide();
+      frappe.dom.freeze("Creating bulk payment…");
+      try {
+        const res = await bs_call("payroll_bulk.api.create_bulk_payment_journal_entry", {
+          batch_name: frm.doc.name,
+          pay_from_account: values.pay_from,
+          payment_date: values.payment_date,
+        });
+        window._bs._completed_view_batch = null;
+        await frm.reload_doc();
+        render_submitted_view(frm);
+        frappe.show_alert(
+          { message: `Payment JE <b>${res.message.journal_entry}</b> created for ${res.message.employee_count} employee(s).`, indicator: "green" },
+          6,
+        );
+      } catch (error) {
+        frappe.msgprint({ title: "Payment Error", message: error.message || String(error), indicator: "red" });
+      } finally {
+        frappe.dom.unfreeze();
+      }
+    },
+  });
+  d.show();
+};
 
 // ─── 16. SUMMARY PDF ──────────────────────────────────────────────────────────
 function bs_download_pdf(results, vals, total_gross, total_ded, total_net, total_ot, success, failed) {

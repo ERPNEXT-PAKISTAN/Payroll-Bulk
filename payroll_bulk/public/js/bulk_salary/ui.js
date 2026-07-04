@@ -2366,11 +2366,48 @@ function render_submitted_view(frm) {
     });
 }
 
-function render_submitted_view_content(frm, $body) {
+async function render_submitted_view_content(frm, $body) {
   const rows = frm.doc.employees || [];
   const draft_count = rows.filter((r) => r.salary_slip && r.salary_slip_status === "Draft").length;
+  const unpaid_count = rows.filter((r) => r.salary_slip_status === "Submitted" && !r.payment_entry).length;
 
-  const trs = rows.map((r)=>`
+  let summary = { columns: [], totals: {}, remark: "", payment_journals: [] };
+  try {
+    const res = await bs_call("payroll_bulk.api.get_batch_completed_summary", { batch_name: frm.doc.name });
+    summary = res.message || summary;
+  } catch (error) {
+    console.warn("Could not load batch summary:", error);
+  }
+
+  const component_cols = summary.columns || [];
+  const comp_by_employee = {};
+  (summary.employees || []).forEach((item) => {
+    comp_by_employee[item.employee] = item.components || {};
+  });
+
+  const totals = summary.totals || {
+    ctc: rows.reduce((s, r) => s + parseFloat(r.ctc || 0), 0),
+    ot_amount: rows.reduce((s, r) => s + parseFloat(r.ot_amount || 0), 0),
+    gross_pay: rows.reduce((s, r) => s + parseFloat(r.gross_pay || 0), 0),
+    adv_deduct: rows.reduce((s, r) => s + parseFloat(r.adv_deduct || 0), 0),
+    net_pay: rows.reduce((s, r) => s + parseFloat(r.net_pay || 0), 0),
+    components: {},
+  };
+
+  const component_header = component_cols
+    .map((col) => `<th class="bs-th" style="text-align:right" title="${frappe.utils.escape_html(col.label)}">${frappe.utils.escape_html(col.label)}</th>`)
+    .join("");
+
+  const trs = rows.map((r) => {
+    const comps = comp_by_employee[r.employee] || {};
+    const component_cells = component_cols
+      .map((col) => {
+        const val = parseFloat(comps[col.key] || 0);
+        const cls = col.type === "deduction" ? "color:var(--bs-red)" : "";
+        return `<td class="bs-td" style="text-align:right;${cls}">${val ? fmt_num(val) : "—"}</td>`;
+      })
+      .join("");
+    return `
     <tr class="bs-row">
       <td class="bs-td bs-td-emp">
         <div class="bs-emp-code">${r.employee||""}</div>
@@ -2379,6 +2416,7 @@ function render_submitted_view_content(frm, $body) {
       <td class="bs-td" style="font-size:12px;color:var(--bs-muted)">${r.department||"—"}</td>
       <td class="bs-td" style="text-align:right">${fmt_num(r.ctc||0)}</td>
       <td class="bs-td" style="text-align:right;color:var(--bs-amber)">${fmt_num(r.ot_amount||0)}</td>
+      ${component_cells}
       <td class="bs-td" style="text-align:right">${fmt_num(r.gross_pay||r.gross||0)}</td>
       <td class="bs-td" style="text-align:right;color:var(--bs-red)">${fmt_num(r.adv_deduct||0)}</td>
       <td class="bs-td" style="text-align:right;font-weight:700;color:var(--bs-green)">${fmt_num(r.net_pay||0)}</td>
@@ -2400,7 +2438,40 @@ function render_submitted_view_content(frm, $body) {
         </span>
         <div style="font-size:11px;color:var(--bs-muted)">${r.status||""}${r.payment_status && r.payment_status !== "Not Paid" ? ` • ${r.payment_status}` : ""}</div>
       </td>
-    </tr>`).join("");
+    </tr>`;
+  }).join("");
+
+  const total_component_cells = component_cols
+    .map((col) => {
+      const val = parseFloat((totals.components || {})[col.key] || 0);
+      return `<td class="bs-td" style="text-align:right;font-weight:700">${val ? fmt_num(val) : "—"}</td>`;
+    })
+    .join("");
+
+  const totals_row = `
+    <tr class="bs-row" style="background:var(--bs-surface-strong);font-weight:700">
+      <td class="bs-td" colspan="2">TOTAL (${rows.length})</td>
+      <td class="bs-td" style="text-align:right">${fmt_num(totals.ctc || 0)}</td>
+      <td class="bs-td" style="text-align:right;color:var(--bs-amber)">${fmt_num(totals.ot_amount || 0)}</td>
+      ${total_component_cells}
+      <td class="bs-td" style="text-align:right">${fmt_num(totals.gross_pay || 0)}</td>
+      <td class="bs-td" style="text-align:right;color:var(--bs-red)">${fmt_num(totals.adv_deduct || 0)}</td>
+      <td class="bs-td" style="text-align:right;color:var(--bs-green)">${fmt_num(totals.net_pay || 0)}</td>
+      <td class="bs-td" colspan="3"></td>
+    </tr>`;
+
+  const jv_links = [];
+  if (frm.doc.accrual_journal_entry) {
+    jv_links.push(`<button class="bs-btn-secondary bs-btn-sm" onclick="bs_open_doc('Journal Entry','${frm.doc.accrual_journal_entry}')">Accrual: ${frm.doc.accrual_journal_entry}</button>`);
+  }
+  if (frm.doc.bulk_payment_entry) {
+    jv_links.push(`<button class="bs-btn-secondary bs-btn-sm" onclick="bs_open_doc('Journal Entry','${frm.doc.bulk_payment_entry}')">Bulk Payment: ${frm.doc.bulk_payment_entry}</button>`);
+  }
+  (summary.payment_journals || []).forEach((name) => {
+    if (name && name !== frm.doc.bulk_payment_entry) {
+      jv_links.push(`<button class="bs-btn-secondary bs-btn-sm" onclick="bs_open_doc('Journal Entry','${name}')">Payment: ${name}</button>`);
+    }
+  });
 
   $body.find("#bs-main-wrap").remove();
   $body.prepend($(`
@@ -2418,25 +2489,27 @@ function render_submitted_view_content(frm, $body) {
       </div>
       <div class="bs-notice bs-notice-success bs-mb">
         Batch processed. ${rows.length} employee row(s) on record.
+        ${summary.remark ? `<div style="margin-top:6px;font-size:12px"><b>JV Remark:</b> ${frappe.utils.escape_html(summary.remark)}</div>` : ""}
       </div>
+      ${jv_links.length ? `<div class="bs-footer-row bs-mb" style="gap:8px;flex-wrap:wrap">${jv_links.join("")}</div>` : ""}
       <div class="bs-footer-row bs-mb">
         ${draft_count ? `<button class="bs-btn-primary" onclick="bs_submit_saved_drafts()">✓ Submit ${draft_count} Draft Slip${draft_count > 1 ? "s" : ""}</button>` : ""}
+        ${unpaid_count ? `<button class="bs-btn-primary" onclick="bs_create_bulk_payment_completed()">💳 Pay All (${unpaid_count})</button>` : ""}
         ${frm.doc.accrual_journal_entry
           ? `<button class="bs-btn-secondary" onclick="bs_open_doc('Journal Entry','${frm.doc.accrual_journal_entry}')">Open Accrual JE</button>`
           : `<button class="bs-btn-secondary" onclick="bs_create_accrual_journal_entry()">🧾 Create Accrual JE</button>`}
       </div>
       <div class="bs-notice bs-notice-info bs-mb" style="font-size:12px">
-        <b>Status:</b> <i>Slip Created</i> = draft salary slip (not yet submitted).
-        <i>Submitted</i> = salary slip submitted in ERPNext — payment can be created.
-        <b>Payment Days</b> = paid days used for basic salary (CTC ÷ 30 × days). Load attendance or set manually when using By Payment Days / Deduct Absent Days.
+        <b>Pay one:</b> use row Pay button. <b>Pay all:</b> use Pay All to create one payment Journal Entry for every unpaid submitted employee.
       </div>
-      <div class="bs-table-wrap">
+      <div class="bs-table-wrap" style="overflow-x:auto">
         <table class="bs-table">
           <thead><tr>
             <th class="bs-th bs-td-emp">Employee</th>
             <th class="bs-th">Department</th>
             <th class="bs-th" style="text-align:right">CTC</th>
             <th class="bs-th" style="text-align:right">Overtime</th>
+            ${component_header}
             <th class="bs-th" style="text-align:right">Gross</th>
             <th class="bs-th" style="text-align:right">Adv.Deduct</th>
             <th class="bs-th" style="text-align:right">Net Pay</th>
@@ -2444,7 +2517,7 @@ function render_submitted_view_content(frm, $body) {
             <th class="bs-th">Payment</th>
             <th class="bs-th">Status</th>
           </tr></thead>
-          <tbody>${trs||'<tr><td colspan="10" class="bs-empty">No rows.</td></tr>'}</tbody>
+          <tbody>${trs}${totals_row}</tbody>
         </table>
       </div>
     </div></div>

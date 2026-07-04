@@ -742,8 +742,224 @@ def _get_common_payroll_payable_account(salary_slips):
 	return payable_account
 
 
+def _format_bulk_jv_remark(batch) -> str:
+	posting_date = getdate(batch.posting_date or batch.end_date or batch.start_date)
+	period_start = getdate(batch.start_date or posting_date)
+	month_label = period_start.strftime("%B-%Y")
+	dated = f"{posting_date.day}-{posting_date.month}-{posting_date.year}"
+	return f"Salary F/O {month_label}, Dated:{dated}"
+
+
 @frappe.whitelist()
-def create_bulk_accrual_journal_entry(batch_name: str):
+def get_salary_payable_account(slip_name: str, batch_name: str | None = None):
+	if not slip_name or not frappe.db.exists("Salary Slip", slip_name):
+		frappe.throw(_("Salary Slip {0} not found.").format(slip_name))
+
+	filters = {"salary_slip": slip_name}
+	if batch_name:
+		filters["parent"] = batch_name
+	row_account = frappe.db.get_value("Bulk Salary Creation Employee", filters, "payroll_payable_account")
+	if row_account:
+		return row_account
+
+	slip = frappe.get_cached_doc("Salary Slip", slip_name)
+	account = frappe.db.get_value(
+		"Salary Structure Assignment",
+		{
+			"employee": slip.employee,
+			"salary_structure": slip.salary_structure,
+			"docstatus": 1,
+			"from_date": ("<=", slip.start_date),
+		},
+		"payroll_payable_account",
+		order_by="from_date desc",
+	)
+	if account:
+		return account
+
+	if slip.journal_entry:
+		account = frappe.db.get_value(
+			"Journal Entry Account",
+			{"parent": slip.journal_entry, "credit_in_account_currency": (">", 0)},
+			"account",
+			order_by="credit_in_account_currency desc",
+		)
+		if account and frappe.db.get_value("Account", account, "account_type") == "Payable":
+			return account
+
+	frappe.throw(_("Could not detect payable account for Salary Slip {0}.").format(slip_name))
+
+
+@frappe.whitelist()
+def get_batch_completed_summary(batch_name: str):
+	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
+		frappe.throw(_("Bulk Salary Creation {0} not found.").format(batch_name))
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	component_meta = {}
+	employees = []
+
+	for row in batch.employees:
+		item = {
+			"employee": row.employee,
+			"employee_name": row.employee_name,
+			"department": row.department,
+			"ctc": flt(row.ctc),
+			"ot_amount": flt(row.ot_amount),
+			"gross_pay": flt(row.gross_pay),
+			"adv_deduct": flt(row.adv_deduct),
+			"net_pay": flt(row.net_pay),
+			"salary_slip": row.salary_slip,
+			"salary_slip_status": row.salary_slip_status,
+			"payment_entry": row.payment_entry,
+			"payment_status": row.payment_status,
+			"status": row.status,
+			"components": {},
+		}
+		if row.salary_slip and frappe.db.exists("Salary Slip", row.salary_slip):
+			for detail in frappe.get_all(
+				"Salary Detail",
+				filters={"parent": row.salary_slip, "parenttype": "Salary Slip"},
+				fields=["salary_component", "amount", "parentfield"],
+			):
+				amount = flt(detail.amount)
+				if not amount:
+					continue
+				key = detail.salary_component
+				component_type = "deduction" if detail.parentfield == "deductions" else "earning"
+				component_meta[key] = {"label": key, "type": component_type}
+				item["components"][key] = flt(item["components"].get(key, 0)) + amount
+		employees.append(item)
+
+	columns = sorted(
+		component_meta.keys(),
+		key=lambda name: (0 if component_meta[name]["type"] == "earning" else 1, name.lower()),
+	)
+	component_totals = {name: 0 for name in columns}
+	for item in employees:
+		for name in columns:
+			component_totals[name] += flt(item["components"].get(name, 0))
+
+	payment_journals = sorted({row.payment_entry for row in batch.employees if row.payment_entry})
+	return {
+		"remark": _format_bulk_jv_remark(batch),
+		"accrual_journal_entry": batch.accrual_journal_entry,
+		"bulk_payment_entry": batch.get("bulk_payment_entry"),
+		"payment_journals": payment_journals,
+		"columns": [{"key": name, **component_meta[name]} for name in columns],
+		"employees": employees,
+		"totals": {
+			"ctc": sum(flt(row.ctc) for row in batch.employees),
+			"ot_amount": sum(flt(row.ot_amount) for row in batch.employees),
+			"gross_pay": sum(flt(row.gross_pay) for row in batch.employees),
+			"adv_deduct": sum(flt(row.adv_deduct) for row in batch.employees),
+			"net_pay": sum(flt(row.net_pay) for row in batch.employees),
+			"components": component_totals,
+		},
+	}
+
+
+@frappe.whitelist()
+def create_bulk_payment_journal_entry(
+	batch_name: str,
+	pay_from_account: str,
+	payment_date: str | None = None,
+	employees: list | str | None = None,
+):
+	if not batch_name or not pay_from_account:
+		frappe.throw(_("Batch and pay-from account are required."))
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	if isinstance(employees, str):
+		employees = frappe.parse_json(employees)
+	employee_set = set(employees or [])
+	payment_date = payment_date or batch.posting_date or frappe.utils.today()
+	remark = _format_bulk_jv_remark(batch)
+
+	rows = [
+		row
+		for row in batch.employees
+		if row.salary_slip
+		and row.salary_slip_status == "Submitted"
+		and not row.payment_entry
+		and (not employee_set or row.employee in employee_set)
+	]
+	if not rows:
+		frappe.throw(_("No submitted unpaid employee rows found for payment."))
+
+	account_type = frappe.db.get_value("Account", pay_from_account, "account_type")
+	voucher_type = "Cash Entry" if account_type == "Cash" else "Bank Entry"
+	accounts = []
+	total_net = 0
+
+	for row in rows:
+		payable_account = get_salary_payable_account(row.salary_slip, batch_name=batch_name)
+		amount = flt(row.net_pay)
+		if amount <= 0:
+			continue
+		total_net += amount
+		accounts.append(
+			{
+				"account": payable_account,
+				"party_type": "Employee",
+				"party": row.employee,
+				"debit_in_account_currency": amount,
+				"credit_in_account_currency": 0,
+			}
+		)
+
+	if not accounts:
+		frappe.throw(_("No payable amounts found for payment."))
+
+	accounts.append(
+		{
+			"account": pay_from_account,
+			"debit_in_account_currency": 0,
+			"credit_in_account_currency": total_net,
+		}
+	)
+
+	journal_entry = frappe.get_doc(
+		{
+			"doctype": "Journal Entry",
+			"voucher_type": voucher_type,
+			"posting_date": payment_date,
+			"cheque_date": payment_date,
+			"company": batch.company,
+			"user_remark": remark,
+			"accounts": accounts,
+		}
+	)
+	journal_entry.insert(ignore_permissions=True)
+	journal_entry.submit()
+
+	for row in rows:
+		frappe.db.set_value(
+			"Bulk Salary Creation Employee",
+			row.name,
+			{
+				"payment_entry": journal_entry.name,
+				"payment_status": "Payment Created",
+				"status": "Payment Created",
+			},
+			update_modified=False,
+		)
+
+	if len(rows) == len([r for r in batch.employees if r.salary_slip_status == "Submitted"]):
+		batch.db_set("bulk_payment_entry", journal_entry.name)
+
+	from payroll_bulk.events.salary_slip import _update_batch_summary
+
+	_update_batch_summary(batch_name)
+	frappe.db.commit()
+	return {
+		"journal_entry": journal_entry.name,
+		"employee_count": len(rows),
+		"total_net": total_net,
+		"remark": remark,
+	}
+
+
 	batch, salary_slips = _get_batch_submitted_salary_slips(batch_name)
 	pending_slips = [slip for slip in salary_slips if not slip.journal_entry]
 	if not pending_slips:
@@ -819,9 +1035,7 @@ def create_bulk_accrual_journal_entry(batch_name: str):
 		currencies,
 		payroll_payable_account,
 		voucher_type="Journal Entry",
-		user_remark=_("Accrual Journal Entry for salaries from {0} to {1} (Batch {2})").format(
-			batch.start_date, batch.end_date, batch.name
-		),
+		user_remark=_format_bulk_jv_remark(batch),
 		submitted_salary_slips=pending_slips,
 		submit_journal_entry=True,
 		employee_wise_accounting_enabled=employee_wise_accounting_enabled,
