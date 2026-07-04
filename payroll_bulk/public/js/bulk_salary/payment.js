@@ -207,7 +207,8 @@ window.bs_create_single_payment = function(employee_id) {
         reqd:1, default: result.net },
       { fieldtype:"Date", fieldname:"payment_date", label:"Payment Date",
         reqd:1, default: frappe.datetime.get_today() },
-      { fieldtype:"Data", fieldname:"reference_no", label:"Reference / Cheque No" },
+      { fieldtype:"Data", fieldname:"reference_no", label:"Reference / Cheque No",
+        default: frm?.doc?.name || "" },
     ],
     primary_action_label:"Create Journal Entry",
     async primary_action(v) {
@@ -229,13 +230,11 @@ window.bs_create_single_payment = function(employee_id) {
         });
         const account_type = pay_from_meta.message?.account_type || "";
         const voucher_type = account_type === "Cash" ? "Cash Entry" : "Bank Entry";
-        const pe = await bs_call("frappe.client.insert",{
-          doc:{
+        const reference_no = (v.reference_no || frm?.doc?.name || result.slip_name || "").trim();
+        const je_doc = {
             doctype: "Journal Entry",
             voucher_type,
             posting_date: v.payment_date,
-            cheque_no: v.reference_no || "",
-            cheque_date: v.payment_date,
             company: vals.company||frappe.defaults.get_default("company"),
             user_remark: jv_remark,
             accounts: [
@@ -254,8 +253,15 @@ window.bs_create_single_payment = function(employee_id) {
                 credit_in_account_currency: v.amount,
               },
             ],
-          },
-        });
+        };
+        if (voucher_type === "Bank Entry") {
+          je_doc.cheque_no = reference_no;
+          je_doc.cheque_date = v.payment_date;
+        } else if (reference_no) {
+          je_doc.cheque_no = reference_no;
+          je_doc.cheque_date = v.payment_date;
+        }
+        const pe = await bs_call("frappe.client.insert", { doc: je_doc });
         result.payment_entry = pe.message.name;
         const safe_id = employee_id.replace(/[^a-z0-9]/gi,"-");
         const btn = document.getElementById(`bs-pay-btn-${safe_id}`);
@@ -305,6 +311,7 @@ async function bs_create_bulk_payment(success_results, pay_from_account, vals) {
       batch_name,
       pay_from_account,
       payment_date: vals.posting_date || frappe.datetime.get_today(),
+      reference_no: vals.reference_no || batch_name,
       employees: eligible.map((r) => r.employee),
     });
     const data = res.message || {};
@@ -367,6 +374,13 @@ window.bs_create_bulk_payment_completed = function () {
         default: frm.doc.posting_date || frappe.datetime.get_today(),
       },
       {
+        fieldtype: "Data",
+        fieldname: "reference_no",
+        label: "Reference / Cheque No",
+        description: "Required for Bank accounts. Defaults to batch name if left blank.",
+        default: frm.doc.name,
+      },
+      {
         fieldtype: "HTML",
         fieldname: "info",
         options: `<div class="bs-notice bs-notice-info">Creates one payment Journal Entry for all unpaid submitted rows. Total net: <b>${fmt_num(unpaid.reduce((s, r) => s + parseFloat(r.net_pay || 0), 0))}</b></div>`,
@@ -381,6 +395,7 @@ window.bs_create_bulk_payment_completed = function () {
           batch_name: frm.doc.name,
           pay_from_account: values.pay_from,
           payment_date: values.payment_date,
+          reference_no: values.reference_no || frm.doc.name,
         });
         window._bs._completed_view_batch = null;
         await frm.reload_doc();

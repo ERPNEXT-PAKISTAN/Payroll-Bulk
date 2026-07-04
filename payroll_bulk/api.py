@@ -896,6 +896,7 @@ def create_bulk_payment_journal_entry(
 	pay_from_account: str,
 	payment_date: str | None = None,
 	employees: list | str | None = None,
+	reference_no: str | None = None,
 ):
 	"""Create one Bank/Cash JE debiting Payroll Payable for unpaid submitted rows."""
 	if not batch_name or not pay_from_account:
@@ -907,6 +908,7 @@ def create_bulk_payment_journal_entry(
 	employee_set = set(employees or [])
 	payment_date = payment_date or batch.posting_date or frappe.utils.today()
 	remark = _format_bulk_jv_remark(batch)
+	reference_no = (reference_no or "").strip()
 
 	rows = [
 		row
@@ -951,17 +953,23 @@ def create_bulk_payment_journal_entry(
 		}
 	)
 
-	journal_entry = frappe.get_doc(
-		{
-			"doctype": "Journal Entry",
-			"voucher_type": voucher_type,
-			"posting_date": payment_date,
-			"cheque_date": payment_date,
-			"company": batch.company,
-			"user_remark": remark,
-			"accounts": accounts,
-		}
-	)
+	je_data = {
+		"doctype": "Journal Entry",
+		"voucher_type": voucher_type,
+		"posting_date": payment_date,
+		"company": batch.company,
+		"user_remark": remark,
+		"accounts": accounts,
+	}
+	# ERPNext requires Reference No + Date for Bank Entry; Cash only if reference is given.
+	if voucher_type == "Bank Entry":
+		je_data["cheque_no"] = reference_no or batch_name
+		je_data["cheque_date"] = payment_date
+	elif reference_no:
+		je_data["cheque_no"] = reference_no
+		je_data["cheque_date"] = payment_date
+
+	journal_entry = frappe.get_doc(je_data)
 	journal_entry.insert(ignore_permissions=True)
 	journal_entry.submit()
 
