@@ -1,6 +1,6 @@
 {
  "app": "payroll_bulk",
- "creation": "2026-07-02 16:10:00.000000",
+ "creation": "2026-07-02 16:10:00",
  "docstatus": 0,
  "doctype": "Workspace Sidebar",
  "header_icon": "briefcase",
@@ -15,7 +15,6 @@
    "label": "Home",
    "link_to": "Payroll Bulk",
    "link_type": "Workspace",
-   "open_in_new_tab": 1,
    "show_arrow": 0,
    "type": "Link"
   },
@@ -28,7 +27,6 @@
    "label": "Bulk Salary Creation",
    "link_to": "Bulk Salary Creation",
    "link_type": "DocType",
-   "open_in_new_tab": 1,
    "show_arrow": 0,
    "type": "Link"
   },
@@ -41,7 +39,6 @@
    "label": "Employee Rows",
    "link_to": "Bulk Salary Creation Employee",
    "link_type": "DocType",
-   "open_in_new_tab": 1,
    "show_arrow": 0,
    "type": "Link"
   },
@@ -53,7 +50,6 @@
    "keep_closed": 1,
    "label": "Setup",
    "link_type": "DocType",
-   "open_in_new_tab": 1,
    "show_arrow": 0,
    "type": "Section Break"
   },
@@ -66,7 +62,6 @@
    "label": "Payroll Bulk Settings",
    "link_to": "Payroll Bulk Settings",
    "link_type": "DocType",
-   "open_in_new_tab": 1,
    "show_arrow": 0,
    "type": "Link"
   },
@@ -78,7 +73,6 @@
    "keep_closed": 1,
    "label": "Reports",
    "link_type": "DocType",
-   "open_in_new_tab": 1,
    "show_arrow": 0,
    "type": "Section Break"
   },
@@ -91,7 +85,6 @@
    "label": "Bulk Salary Creation Summary",
    "link_to": "Bulk Salary Creation Summary",
    "link_type": "Report",
-   "open_in_new_tab": 1,
    "show_arrow": 0,
    "type": "Link"
   },
@@ -104,12 +97,66 @@
    "label": "Bulk Salary Employee Detail",
    "link_to": "Bulk Salary Employee Detail",
    "link_type": "Report",
-   "open_in_new_tab": 1,
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Bulk Salary Slip Reconciliation",
+   "link_to": "Bulk Salary Slip Reconciliation",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Bulk Salary Payment Status",
+   "link_to": "Bulk Salary Payment Status",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Bulk Salary Component Detail",
+   "link_to": "Bulk Salary Component Detail",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Bulk Salary Advance Summary",
+   "link_to": "Bulk Salary Advance Summary",
+   "link_type": "Report",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 1,
+   "collapsible": 1,
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Daily Employee Checkin",
+   "link_to": "daily-employee-check",
+   "link_type": "Page",
    "show_arrow": 0,
    "type": "Link"
   }
  ],
- "modified": "2026-07-02 16:10:00.000000",
+ "modified": "2026-07-05 01:17:21.751459",
  "modified_by": "Administrator",
  "module": "Payroll Bulk",
  "name": "Payroll Bulk",

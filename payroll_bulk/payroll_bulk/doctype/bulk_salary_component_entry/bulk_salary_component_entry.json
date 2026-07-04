@@ -104,6 +104,7 @@
       "fieldname": "amount",
       "fieldtype": "Currency",
       "label": "Amount",
+      "precision": "0",
       "in_list_view": 1,
       "reqd": 0
     }

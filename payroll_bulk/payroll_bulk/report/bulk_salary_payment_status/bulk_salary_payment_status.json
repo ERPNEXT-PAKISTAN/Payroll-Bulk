@@ -1,0 +1,14 @@
+{
+  "doctype": "Report",
+  "name": "Bulk Salary Payment Status",
+  "report_name": "Bulk Salary Payment Status",
+  "ref_doctype": "Bulk Salary Creation Employee",
+  "module": "Payroll Bulk",
+  "report_type": "Script Report",
+  "is_standard": "Yes",
+  "roles": [
+    {"role": "System Manager"},
+    {"role": "HR Manager"},
+    {"role": "HR User"}
+  ]
+}

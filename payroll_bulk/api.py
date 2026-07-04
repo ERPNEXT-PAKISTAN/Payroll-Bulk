@@ -7,6 +7,8 @@ salary slip processing.
 
 from __future__ import annotations
 
+import json
+
 import erpnext
 import frappe
 from frappe import _
@@ -451,6 +453,7 @@ def get_bulk_checkin_overtime_values(
 	employees: list[str] | str,
 	start_date: str,
 	end_date: str,
+	ot_method: str = "out_in",
 ):
 	if isinstance(employees, str):
 		employees = frappe.parse_json(employees)
@@ -523,7 +526,7 @@ def get_bulk_checkin_overtime_values(
 		if shift_start and shift_end and shift_end > shift_start:
 			shift_hours = (shift_end - shift_start).total_seconds() / 3600
 
-		overtime_hours = max(worked_hours - shift_hours, 0.0)
+		overtime_hours = worked_hours if ot_method == "out_in" else max(worked_hours - shift_hours, 0.0)
 		item["worked_hours"] += worked_hours
 		item["shift_hours"] += shift_hours
 		item["overtime_hours"] += overtime_hours
@@ -532,25 +535,69 @@ def get_bulk_checkin_overtime_values(
 
 
 @frappe.whitelist()
-def get_employee_advance_balance(employee: str):
-	if not employee:
-		return {"employee": "", "balance": 0.0, "count": 0}
+def get_bulk_employee_advance_balances(employees=None, company: str | None = None):
+	if isinstance(employees, str):
+		try:
+			employees = json.loads(employees)
+		except json.JSONDecodeError:
+			employees = [employees]
+	employees = [employee for employee in (employees or []) if employee]
+	result = {}
+	for employee in employees:
+		result[employee] = get_employee_advance_balance(employee, company=company)
+	return result
 
-	rows = frappe.get_all(
-		"Employee Advance",
-		filters=[
-			["employee", "=", employee],
-			["docstatus", "=", 1],
-			["pending_amount", ">", 0],
-		],
-		fields=["name", "pending_amount"],
-		limit_page_length=5000,
+
+@frappe.whitelist()
+def get_employee_advance_balance(employee: str, company: str | None = None):
+	if not employee:
+		return {"employee": "", "balance": 0.0, "count": 0, "advances": []}
+
+	Advance = frappe.qb.DocType("Employee Advance")
+	query = (
+		frappe.qb.from_(Advance)
+		.select(
+			Advance.name,
+			Advance.purpose,
+			Advance.status,
+			Advance.paid_amount,
+			Advance.claimed_amount,
+			Advance.return_amount,
+			Advance.posting_date,
+		)
+		.where(
+			(Advance.docstatus == 1)
+			& (Advance.employee == employee)
+			& (Advance.status.isin(["Paid", "Unpaid"]))
+			& (Advance.paid_amount > 0)
+		)
 	)
+	if company:
+		query = query.where(Advance.company == company)
+
+	rows = query.run(as_dict=True)
+	advances = []
+	total_balance = 0.0
+	for row in rows:
+		balance = flt(row.paid_amount) - flt(row.claimed_amount) - flt(row.return_amount)
+		if balance <= 0:
+			continue
+		total_balance += balance
+		advances.append(
+			{
+				"name": row.name,
+				"purpose": row.purpose or row.name,
+				"status": row.status,
+				"balance": balance,
+				"posting_date": row.posting_date,
+			}
+		)
 
 	return {
 		"employee": employee,
-		"balance": sum(flt(row.pending_amount) for row in rows),
-		"count": len(rows),
+		"balance": total_balance,
+		"count": len(advances),
+		"advances": advances,
 	}
 
 
@@ -831,15 +878,19 @@ def get_batch_completed_summary(batch_name: str):
 	employees = []
 
 	for row in batch.employees:
+		days = flt(row.payment_days) or 30
+		base_pay = _pb_money(flt(row.ctc) / 30 * days)
 		item = {
 			"employee": row.employee,
 			"employee_name": row.employee_name,
 			"department": row.department,
-			"ctc": flt(row.ctc),
-			"ot_amount": flt(row.ot_amount),
-			"gross_pay": flt(row.gross_pay),
-			"adv_deduct": flt(row.adv_deduct),
-			"net_pay": flt(row.net_pay),
+			"ctc": _pb_money(row.ctc),
+			"payment_days": days,
+			"base_pay": base_pay,
+			"ot_amount": _pb_money(row.ot_amount),
+			"gross_pay": _pb_money(row.gross_pay),
+			"adv_deduct": _pb_money(row.adv_deduct),
+			"net_pay": _pb_money(row.net_pay),
 			"salary_slip": row.salary_slip,
 			"salary_slip_status": row.salary_slip_status,
 			"payment_entry": row.payment_entry,
@@ -857,6 +908,8 @@ def get_batch_completed_summary(batch_name: str):
 				if not amount:
 					continue
 				key = detail.salary_component
+				if key and str(key).lower() in ("basic", "basic salary", "overtime", "ot"):
+					continue
 				component_type = "deduction" if detail.parentfield == "deductions" else "earning"
 				component_meta[key] = {"label": key, "type": component_type}
 				item["components"][key] = flt(item["components"].get(key, 0)) + amount
@@ -880,11 +933,12 @@ def get_batch_completed_summary(batch_name: str):
 		"columns": [{"key": name, **component_meta[name]} for name in columns],
 		"employees": employees,
 		"totals": {
-			"ctc": sum(flt(row.ctc) for row in batch.employees),
-			"ot_amount": sum(flt(row.ot_amount) for row in batch.employees),
-			"gross_pay": sum(flt(row.gross_pay) for row in batch.employees),
-			"adv_deduct": sum(flt(row.adv_deduct) for row in batch.employees),
-			"net_pay": sum(flt(row.net_pay) for row in batch.employees),
+			"ctc": _pb_money(sum(flt(row.ctc) for row in batch.employees)),
+			"base_pay": _pb_money(sum(_pb_money(flt(row.ctc) / 30 * (flt(row.payment_days) or 30)) for row in batch.employees)),
+			"ot_amount": _pb_money(sum(flt(row.ot_amount) for row in batch.employees)),
+			"gross_pay": _pb_money(sum(flt(row.gross_pay) for row in batch.employees)),
+			"adv_deduct": _pb_money(sum(flt(row.adv_deduct) for row in batch.employees)),
+			"net_pay": _pb_money(sum(flt(row.net_pay) for row in batch.employees)),
 			"components": component_totals,
 		},
 	}
@@ -1331,11 +1385,12 @@ def _manual_base_amount(row, manual_salary_basis: str | None, ctc: float, daily:
 	basis = manual_salary_basis or "Full Month"
 	if basis == "By Payment Days":
 		days = flt(row.get("payment_days"))
-		return flt(daily * days) if days else ctc
+		return _pb_money(daily * days) if days else _pb_money(ctc)
 	if basis == "Deduct Absent Days":
 		absent = flt(row.get("absent_days"))
-		return flt(daily * max(0, 30 - absent)) if absent else ctc
-	return ctc
+		return _pb_money(daily * max(0, 30 - absent)) if absent else _pb_money(ctc)
+	days = flt(row.get("payment_days")) or 30
+	return _pb_money(daily * days)
 
 
 def _calculate_batch_base_amount(
@@ -1503,6 +1558,149 @@ def _create_base_additional_salary_if_needed(
 	)
 
 
+RECONCILE_TOLERANCE = 1
+
+
+def _pb_money(value) -> float:
+	return round(flt(value))
+
+
+@frappe.whitelist()
+def get_batch_slip_reconciliation(batch_name: str):
+	"""Compare batch employee row totals with linked Salary Slip amounts."""
+	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
+		frappe.throw(_("Bulk Salary Creation {0} not found.").format(batch_name))
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	rows = []
+	summary = {"total": 0, "matched": 0, "mismatched": 0, "missing_slip": 0, "no_row": 0}
+
+	for row in batch.employees:
+		item = {
+			"employee": row.employee,
+			"employee_name": row.employee_name,
+			"department": row.department,
+			"salary_slip": row.salary_slip or "",
+			"salary_slip_status": row.salary_slip_status or "",
+			"batch_gross": flt(row.gross_pay),
+			"batch_net": flt(row.net_pay),
+			"slip_gross": 0,
+			"slip_net": 0,
+			"gross_diff": 0,
+			"net_diff": 0,
+			"match": True,
+			"issue": "",
+		}
+		summary["total"] += 1
+
+		if not row.salary_slip or not frappe.db.exists("Salary Slip", row.salary_slip):
+			item["match"] = False
+			item["issue"] = "Missing Salary Slip"
+			summary["missing_slip"] += 1
+			rows.append(item)
+			continue
+
+		slip = frappe.db.get_value(
+			"Salary Slip",
+			row.salary_slip,
+			["gross_pay", "net_pay", "docstatus", "status"],
+			as_dict=True,
+		)
+		item["slip_gross"] = flt(slip.gross_pay)
+		item["slip_net"] = flt(slip.net_pay)
+		item["gross_diff"] = flt(row.gross_pay) - flt(slip.gross_pay)
+		item["net_diff"] = flt(row.net_pay) - flt(slip.net_pay)
+
+		if abs(item["gross_diff"]) > RECONCILE_TOLERANCE or abs(item["net_diff"]) > RECONCILE_TOLERANCE:
+			item["match"] = False
+			item["issue"] = "Amount mismatch"
+			summary["mismatched"] += 1
+		else:
+			summary["matched"] += 1
+
+		rows.append(item)
+
+	orphan_slips = frappe.get_all(
+		"Salary Slip",
+		filters={
+			"bulk_salary_creation": batch_name,
+			"docstatus": ["<", 2],
+		},
+		fields=["name", "employee", "employee_name", "gross_pay", "net_pay", "status"],
+	)
+	linked_slips = {row.salary_slip for row in batch.employees if row.salary_slip}
+	for slip in orphan_slips:
+		if slip.name in linked_slips:
+			continue
+		summary["no_row"] += 1
+		rows.append(
+			{
+				"employee": slip.employee,
+				"employee_name": slip.employee_name,
+				"department": "",
+				"salary_slip": slip.name,
+				"salary_slip_status": slip.status or "",
+				"batch_gross": 0,
+				"batch_net": 0,
+				"slip_gross": flt(slip.gross_pay),
+				"slip_net": flt(slip.net_pay),
+				"gross_diff": -flt(slip.gross_pay),
+				"net_diff": -flt(slip.net_pay),
+				"match": False,
+				"issue": "Slip not linked to batch row",
+			}
+		)
+
+	return {"rows": rows, "summary": summary, "batch_name": batch_name}
+
+
+def _guess_qty_component(structure_doc):
+	return _guess_component(structure_doc, "earnings", ("qty", "quantity", "piece", "production"))
+
+
+def _sync_piece_additional_salaries(
+	row,
+	batch,
+	structure_doc,
+	company,
+	start_date,
+	end_date,
+	posting_date,
+	batch_name,
+):
+	if (batch.calculation_mode or "Manual") != "Per Piece or Per Hour":
+		return
+
+	hourly_rate = flt(row.get("ctc")) / 30 / 8 if flt(row.get("ctc")) else 0
+	hour_amount = hourly_rate * flt(row.get("source_hours")) if cint(row.get("use_hours")) else 0
+	qty_amount = flt(row.get("source_qty")) * flt(row.get("piece_rate")) if cint(row.get("use_qty")) else 0
+	overtime_component = _guess_component(structure_doc, "earnings", ("overtime", "ot", "hour", "hourly"))
+	qty_component = _guess_qty_component(structure_doc)
+	settings = frappe.get_cached_doc("Payroll Bulk Settings") if frappe.db.exists("Payroll Bulk Settings", "Payroll Bulk Settings") else None
+	if settings and settings.get("qty_component"):
+		qty_component = settings.qty_component
+	if settings and settings.get("hours_component"):
+		overtime_component = settings.hours_component
+
+	merge_qty = not qty_component or qty_component == overtime_component or qty_component == "Bulk Piece Qty"
+	if merge_qty:
+		combined = hour_amount + qty_amount
+		if combined > 0 and overtime_component:
+			_upsert_additional_salary(
+				row, company, overtime_component, "Earning", combined, start_date, end_date, posting_date, batch_name
+			)
+		return
+
+	if hour_amount > 0 and overtime_component:
+		_upsert_additional_salary(
+			row, company, overtime_component, "Earning", hour_amount, start_date, end_date, posting_date, batch_name
+		)
+	if qty_amount > 0 and qty_component:
+		_upsert_additional_salary(
+			row, company, qty_component, "Earning", qty_amount, start_date, end_date, posting_date, batch_name
+		)
+
+
 def _get_batch_component_entries(batch_name: str, row_name: str, employee: str):
 	filters = {"parent": batch_name}
 	if row_name:
@@ -1600,17 +1798,22 @@ def sync_bulk_row_additional_salaries(
 		manual_salary_basis,
 		overtime_with_salary,
 	)
-	_upsert_additional_salary(
-		row,
-		company,
-		_guess_component(structure_doc, "earnings", ("overtime", "ot")),
-		"Earning",
-		row.ot_amount,
-		start_date,
-		end_date,
-		posting_date,
-		batch_name,
-	)
+	if calculation_mode == "Per Piece or Per Hour":
+		_sync_piece_additional_salaries(
+			row, batch, structure_doc, company, start_date, end_date, posting_date, batch_name
+		)
+	else:
+		_upsert_additional_salary(
+			row,
+			company,
+			_guess_component(structure_doc, "earnings", ("overtime", "ot")),
+			"Earning",
+			row.ot_amount,
+			start_date,
+			end_date,
+			posting_date,
+			batch_name,
+		)
 	_upsert_additional_salary(
 		row,
 		company,

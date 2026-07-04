@@ -1,0 +1,13 @@
+{
+  "doctype": "Report",
+  "name": "Bulk Salary Slip Reconciliation",
+  "ref_doctype": "Bulk Salary Creation",
+  "module": "Payroll Bulk",
+  "report_type": "Script Report",
+  "is_standard": "Yes",
+  "roles": [
+    {"role": "System Manager"},
+    {"role": "HR Manager"},
+    {"role": "HR User"}
+  ]
+}

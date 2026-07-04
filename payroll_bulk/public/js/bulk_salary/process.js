@@ -10,6 +10,12 @@ async function bs_save_draft() {
     await new Promise((res, rej) =>
       window._bs.frm.save("Save", (r) => r.exc ? rej(new Error(r.exc)) : res(r))
     );
+    (window._bs.rows || []).forEach((row) => {
+      if (typeof bs_capture_row_saved_components === "function") {
+        bs_capture_row_saved_components(row);
+      }
+    });
+    bs_render_table();
     frappe.show_alert({ message:"Draft saved ✓", indicator:"green" }, 3);
   } catch(e) {
     frappe.msgprint({ title:"Save Error", message: e.message||String(e), indicator:"red" });
@@ -47,10 +53,10 @@ function bs_sync_to_frm(frm) {
     c.employee_name   = row.employee_name;
     c.department      = row.department;
     c.designation     = row.designation;
-    c.ctc             = row.ctc;
-    c.ot_type         = row.ot_type === "days" ? "Days" : "Hours";
+    c.ctc             = bs_round_money(row.ctc);
+    c.ot_type         = "Hours";
     c.ot_input        = row.ot_input;
-    c.ot_amount       = row.ot_amount;
+    c.ot_amount       = bs_round_money(row.ot_amount);
     c.piece_basis     = row.piece_basis || frm.doc.per_piece_basis || "Total Hours";
     c.source_hours    = row.source_hours || 0;
     c.source_qty      = row.source_qty || 0;
@@ -60,20 +66,20 @@ function bs_sync_to_frm(frm) {
     c.attendance_days = row.attendance_days || 0;
     c.absent_days     = row.absent_days || 0;
     c.attendance_hours = row.attendance_hours || 0;
-    c.payment_days    = row.payment_days || 0;
+    c.payment_days    = Math.round(row.payment_days || 0) || (window._bs.frm?.doc?.calculation_mode === "Manual" ? 30 : 0);
     c.worked_hours    = row.worked_hours || 0;
     c.shift_hours     = row.shift_hours || 0;
     c.overtime_hours  = row.overtime_hours || 0;
-    c.bonus_amount    = row.bonus_amount || 0;
-    c.other_allowance = row.other_allowance || 0;
-    c.total_additions = row.total_additions || 0;
-    c.advance_balance = row.advance_balance || 0;
-    c.adv_deduct      = row.adv_deduct;
-    c.late_deduction  = row.late_deduction || 0;
-    c.other_deduction = row.other_deduction || 0;
-    c.total_deductions = row.total_deductions || 0;
-    c.gross_pay       = row.gross;
-    c.net_pay         = row.net;
+    c.bonus_amount    = bs_round_money(row.bonus_amount || 0);
+    c.other_allowance = bs_round_money(row.other_allowance || 0);
+    c.total_additions = bs_round_money(row.total_additions || 0);
+    c.advance_balance = bs_round_money(row.advance_balance || 0);
+    c.adv_deduct      = bs_round_money(row.adv_deduct);
+    c.late_deduction  = bs_round_money(row.late_deduction || 0);
+    c.other_deduction = bs_round_money(row.other_deduction || 0);
+    c.total_deductions = bs_round_money(row.total_deductions || 0);
+    c.gross_pay       = bs_round_money(row.gross);
+    c.net_pay         = bs_round_money(row.net);
     c.status          = row.status || "Pending";
     c.salary_slip_status = row.salary_slip_status || "";
     c.payment_status  = row.payment_status || "Not Paid";
@@ -93,14 +99,18 @@ function bs_sync_to_frm(frm) {
         component_row.employee = row.employee;
         component_row.salary_component = item.component;
         component_row.component_type = item.type || "Earning";
-        component_row.amount = parseFloat(item.amount || 0) || 0;
+        component_row.amount = bs_round_money(parseFloat(item.amount || 0) || 0);
       });
+    if (typeof bs_capture_row_saved_components === "function") {
+      bs_capture_row_saved_components(row);
+    }
     next_employees.push(c);
   });
 
   frm.doc.employees = next_employees;
   bs_update_parent_summary(frm);
   frm.refresh_field("employees");
+  frm.refresh_field("component_entries");
 }
 
 function bs_update_parent_summary(frm) {
@@ -372,6 +382,10 @@ async function bs_refresh_structure_assignments(rows = window._bs.rows || []) {
         : `Payroll Payable Account missing on ${row.salary_structure_assignment || "Salary Structure Assignment"}`;
       if (should_load_components) {
         bs_build_row_components(row, structure_doc, { include_structure: include_structure_components });
+        if (typeof bs_apply_saved_component_map === "function") {
+          bs_apply_saved_component_map(row);
+        }
+        recalc_row(row);
       }
     } catch (error) {
       row.salary_structure = "";
@@ -381,6 +395,10 @@ async function bs_refresh_structure_assignments(rows = window._bs.rows || []) {
       row.structure_warning = error.message || "Salary Structure Assignment not found";
       if (should_load_components) {
         bs_build_row_components(row, null, { include_structure: false });
+        if (typeof bs_apply_saved_component_map === "function") {
+          bs_apply_saved_component_map(row);
+        }
+        recalc_row(row);
       } else {
         row.components = row.components || [];
       }
@@ -477,15 +495,17 @@ async function bs_prepare_salary_inputs(row, vals, batch_name) {
   const hourly_rate = (parseFloat(row.ctc || 0) || 0) / 30 / 8;
   const hour_amount = (parseFloat(row.source_hours || 0) || 0) * hourly_rate;
   const qty_amount = (parseFloat(row.source_qty || 0) || 0) * (parseFloat(row.piece_rate || 0) || 0);
+  const structure_doc = bs_get_cached_structure_doc(row.salary_structure || "");
+  const merge_piece_qty = bs_is_piece_mode(mode) && bs_should_merge_piece_qty_into_hours(structure_doc);
 
-  if (bs_is_piece_mode(mode) && hour_amount > 0) {
+  if (bs_is_piece_mode(mode) && (hour_amount > 0 || (merge_piece_qty && qty_amount > 0))) {
     const hour_component = await bs_resolve_special_component(row, vals, "hours");
     await bs_make_additional_salary({
       employee: row.employee,
       company: vals.company,
       component: hour_component,
       type: "Earning",
-      amount: hour_amount,
+      amount: merge_piece_qty ? (hour_amount + qty_amount) : hour_amount,
       payroll_date: vals.posting_date,
       start_date: vals.start_date,
       end_date: vals.end_date,
@@ -494,7 +514,7 @@ async function bs_prepare_salary_inputs(row, vals, batch_name) {
     });
   }
 
-  if (bs_is_piece_mode(mode) && qty_amount > 0) {
+  if (bs_is_piece_mode(mode) && qty_amount > 0 && !merge_piece_qty) {
     const qty_component = await bs_resolve_special_component(row, vals, "qty");
     await bs_make_additional_salary({
       employee: row.employee,
@@ -547,7 +567,7 @@ async function bs_prepare_salary_inputs(row, vals, batch_name) {
 
   for (const item of (row.components || [])) {
     const amount = parseFloat(item.amount || 0);
-    if (!item.component || amount <= 0) continue;
+    if (!item.component || amount <= 0 || item.auto_calculated) continue;
     await bs_make_additional_salary({
       employee: row.employee,
       company: vals.company,

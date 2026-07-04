@@ -1,6 +1,7 @@
 {
   "doctype": "Report",
   "name": "Bulk Salary Employee Detail",
+  "report_name": "Bulk Salary Employee Detail",
   "ref_doctype": "Bulk Salary Creation Employee",
   "module": "Payroll Bulk",
   "report_type": "Script Report",
