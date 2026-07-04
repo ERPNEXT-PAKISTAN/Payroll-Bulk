@@ -1,15 +1,34 @@
 // Payroll Bulk — batch processing, salary slip creation
 // ─── 9. SAVE DRAFT ────────────────────────────────────────────────────────────
+async function bs_ensure_source_loaded_for_period(frm) {
+  if (!frm || !bs_is_source_driven_mode(frm) || !(window._bs.rows || []).length) return;
+  bs_sync_period_from_header(frm);
+  const current_key = bs_period_key(frm.doc.start_date, frm.doc.end_date);
+  if (window._bs.loaded_source_period !== current_key) {
+    await bs_trigger_source_reload({ force: true });
+  }
+}
+
 async function bs_save_draft() {
   if (!window._bs.rows.length) {
     frappe.show_alert({ message:"Add at least one employee first.", indicator:"orange" }, 4);
     return;
   }
-  bs_sync_to_frm(window._bs.frm);
+  const frm = window._bs.frm;
+  bs_sync_period_from_header(frm);
+  if (typeof bs_sync_source_doc === "function") {
+    await bs_sync_source_doc(frm);
+  }
+  await bs_ensure_source_loaded_for_period(frm);
+  bs_sync_to_frm(frm);
   try {
     await new Promise((res, rej) =>
       window._bs.frm.save("Save", (r) => r.exc ? rej(new Error(r.exc)) : res(r))
     );
+    await frm.reload_doc();
+    if (typeof bs_apply_source_metrics_from_doc === "function") {
+      bs_apply_source_metrics_from_doc(frm);
+    }
     (window._bs.rows || []).forEach((row) => {
       if (typeof bs_capture_row_saved_components === "function") {
         bs_capture_row_saved_components(row);

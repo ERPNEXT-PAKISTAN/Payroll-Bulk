@@ -1,5 +1,6 @@
 frappe.ui.form.on("Payroll Bulk Settings", {
   refresh(frm) {
+    pb_bind_doctype_query(frm);
     pb_refresh_source_fields(frm);
     pb_bind_component_rule_query(frm);
     pb_bind_component_queries(frm);
@@ -30,10 +31,15 @@ frappe.ui.form.on("Payroll Bulk Settings", {
   },
 
   default_calculation_mode(frm) {
+    pb_sync_legacy_piece_flags(frm);
     pb_toggle_source_fields(frm);
   },
 
   default_per_piece_basis(frm) {
+    pb_sync_legacy_piece_flags(frm);
+  },
+
+  default_overtime_source(frm) {
     pb_toggle_source_fields(frm);
   },
 
@@ -53,6 +59,14 @@ frappe.ui.form.on("Payroll Bulk Settings", {
     }
   },
 });
+
+function pb_bind_doctype_query(frm) {
+  frm.set_query("overtime_doctype", () => ({
+    filters: {
+      issingle: 0,
+    },
+  }));
+}
 
 function pb_bind_component_rule_query(frm) {
   const grid = frm.get_field("component_rules")?.grid;
@@ -86,11 +100,11 @@ async function pb_refresh_source_fields(frm) {
       }).then((r) => r.message || [])
     : [];
 
-  pb_set_field_options(frm, "overtime_employee_field", pb_filter_source_fields(fields, "employee"), "Select employee field");
-  pb_set_field_options(frm, "overtime_date_field", pb_filter_source_fields(fields, "date"), "Select date field");
-  pb_set_field_options(frm, "overtime_hours_field", pb_filter_source_fields(fields, "number"), "Select total hours field");
-  pb_set_field_options(frm, "overtime_qty_field", pb_filter_source_fields(fields, "number"), "Select total qty field");
-  pb_set_field_options(frm, "overtime_rate_field", pb_filter_source_fields(fields, "number"), "Select rate per piece field");
+  pb_set_field_options(frm, "overtime_employee_field", pb_filter_source_fields(fields, "employee"), "Employee Field");
+  pb_set_field_options(frm, "overtime_date_field", pb_filter_source_fields(fields, "date"), "Date Field");
+  pb_set_field_options(frm, "overtime_hours_field", pb_filter_source_fields(fields, "number"), "Hours Field");
+  pb_set_field_options(frm, "overtime_qty_field", pb_filter_source_fields(fields, "number"), "Qty Field");
+  pb_set_field_options(frm, "overtime_rate_field", pb_filter_source_fields(fields, "rate"), "Rate Field");
   pb_toggle_source_fields(frm);
 }
 
@@ -105,17 +119,40 @@ function pb_set_field_options(frm, fieldname, fields, placeholder) {
 }
 
 function pb_filter_source_fields(fields, kind) {
+  const is_rate_field = (df) => {
+    if (["Float", "Currency", "Int", "Percent", "Duration"].includes(df.fieldtype)) return true;
+    const name = String(df.fieldname || "").toLowerCase();
+    return df.fieldtype === "Data" && /rate|piece|amount|price|target|qty|hour/.test(name);
+  };
   const by_kind = {
     employee: (df) => (df.fieldtype === "Link" && df.options === "Employee") || ["Data", "Dynamic Link", "Select"].includes(df.fieldtype),
-    date: (df) => ["Date", "Datetime"].includes(df.fieldtype),
-    number: (df) => ["Float", "Currency", "Int", "Percent"].includes(df.fieldtype),
+    date: (df) => ["Date", "Datetime"].includes(df.fieldtype) || String(df.fieldname || "").startsWith("@parent."),
+    number: (df) => ["Float", "Currency", "Int", "Percent", "Duration"].includes(df.fieldtype),
+    rate: is_rate_field,
   };
   return (fields || []).filter((df) => (by_kind[kind] ? by_kind[kind](df) : true));
 }
 
+function pb_sync_legacy_piece_flags(frm) {
+  const basis = frm.doc.default_per_piece_basis || "Total Hours";
+  frm.set_value({
+    default_use_hours: basis === "Total Hours" ? 1 : 0,
+    default_use_qty: basis === "Total Qty" ? 1 : 0,
+  });
+}
+
 function pb_toggle_source_fields(frm) {
-  const piece_mode = frm.doc.default_calculation_mode === "Per Piece or Per Hour";
-  frm.toggle_display("default_per_piece_basis", false);
-  frm.toggle_display("overtime_qty_field", piece_mode);
-  frm.toggle_display("overtime_rate_field", piece_mode);
+  const mode = frm.doc.default_calculation_mode || "Manual";
+  const ot_source = frm.doc.default_overtime_source || "Manual";
+  const piece_mode = mode === "Per Piece or Per Hour";
+  const show_source = ot_source === "Custom DocType" || piece_mode;
+
+  frm.toggle_display("default_manual_salary_basis", mode === "Manual");
+  frm.toggle_display("default_per_piece_basis", piece_mode);
+
+  ["overtime_doctype", "overtime_employee_field", "overtime_date_field", "overtime_hours_field"].forEach((fieldname) => {
+    frm.toggle_display(fieldname, show_source);
+  });
+  frm.toggle_display("overtime_qty_field", show_source && piece_mode);
+  frm.toggle_display("overtime_rate_field", show_source && piece_mode);
 }

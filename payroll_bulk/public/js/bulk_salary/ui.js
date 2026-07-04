@@ -2,12 +2,14 @@
 // ─── 3. MAIN UI ───────────────────────────────────────────────────────────────
 async function bs_bootstrap_main_ui(frm) {
   window._bs.settings = await bs_get_settings();
-  render_main_ui(frm);
+  await render_main_ui(frm);
 }
 
 function bs_default_settings() {
   return {
     default_calculation_mode: "Manual",
+    default_manual_salary_basis: "Full Month",
+    default_overtime_source: "Manual",
     default_per_piece_basis: "Total Hours",
     auto_load_structure_components: 1,
     component_rules: [],
@@ -87,10 +89,11 @@ function bs_calculate_base_pay(row, frm) {
   }
 
   if (bs_is_piece_mode(mode)) {
-    if (row.overtime_with_salary) {
-      return bs_manual_base_pay(row, daily, basis);
+    const basis = frm?.doc?.per_piece_basis || "Total Hours";
+    if (basis === "Total Qty") {
+      return parseFloat(row.qty_amount || 0) || 0;
     }
-    return (parseFloat(row.hours_amount || 0) || 0) + (parseFloat(row.qty_amount || 0) || 0);
+    return parseFloat(row.hours_amount || 0) || 0;
   }
 
   return bs_manual_base_pay(row, daily, basis);
@@ -175,8 +178,11 @@ async function bs_get_settings() {
 function bs_apply_source_defaults(frm, settings) {
   frm.doc.company = frm.doc.company || settings.company || frappe.defaults.get_default("company") || "";
   frm.doc.calculation_mode = frm.doc.calculation_mode || settings.default_calculation_mode || "Manual";
+  frm.doc.manual_salary_basis = frm.doc.manual_salary_basis || settings.default_manual_salary_basis || "Full Month";
   frm.doc.attendance_source = bs_get_mode_attendance_source(frm.doc.calculation_mode);
-  frm.doc.overtime_source = frm.doc.overtime_source || bs_get_default_overtime_source(frm.doc.calculation_mode || "Manual");
+  if (!frm.doc.overtime_source) {
+    frm.doc.overtime_source = settings.default_overtime_source || bs_get_default_overtime_source(frm.doc.calculation_mode || "Manual", settings);
+  }
   frm.doc.per_piece_basis = frm.doc.per_piece_basis || settings.default_per_piece_basis || "Total Hours";
   frm.doc.overtime_doctype = frm.doc.overtime_doctype || settings.overtime_doctype || "";
   frm.doc.overtime_employee_field = frm.doc.overtime_employee_field || settings.overtime_employee_field || "";
@@ -184,9 +190,9 @@ function bs_apply_source_defaults(frm, settings) {
   frm.doc.overtime_hours_field = frm.doc.overtime_hours_field || settings.overtime_hours_field || "";
   frm.doc.overtime_qty_field = frm.doc.overtime_qty_field || settings.overtime_qty_field || "";
   frm.doc.overtime_rate_field = frm.doc.overtime_rate_field || settings.overtime_rate_field || "";
-  frm.doc.use_hours = bs_to_int(settings.default_use_hours, 1);
-  frm.doc.use_qty = bs_to_int(settings.default_use_qty, 1);
-  frm.doc.overtime_with_salary = bs_to_int(settings.default_overtime_with_salary, 0);
+  frm.doc.use_hours = bs_to_int(frm.doc.use_hours ?? settings.default_use_hours, 1);
+  frm.doc.use_qty = bs_to_int(frm.doc.use_qty ?? settings.default_use_qty, 1);
+  frm.doc.overtime_with_salary = bs_to_int(frm.doc.overtime_with_salary ?? settings.default_overtime_with_salary, 0);
   Object.assign(frm.doc, bs_normalize_source_values(frm.doc));
   if (frm.doc.month && (!frm.doc.start_date || !frm.doc.end_date)) {
     bs_apply_month_period(frm, frm.doc.month);
@@ -259,7 +265,19 @@ function bs_hide_filters() {
   const $area = $("#bs-filters-area");
   if (!$area.length) return;
   $area.addClass("is-hidden");
-  $("#bs-toggle-filters-btn").text("☰ Filters");
+  $("#bs-toggle-filters-btn").text("☰ Field Mapping");
+}
+
+function bs_update_source_mapping_header(frm) {
+  const mode = frm?.doc?.calculation_mode || "Manual";
+  const use_piece = bs_is_piece_mode(mode);
+  const overtime_source = bs_get_active_overtime_source(frm);
+  const show_field_mapping = overtime_source === "Custom DocType" || use_piece;
+  $(".bs-source-mapping-panel").toggleClass("is-hidden", !show_field_mapping);
+  if (!show_field_mapping && !$("#bs-filters-area").hasClass("is-hidden")) {
+    bs_hide_filters();
+  }
+  $("#bs-toggle-filters-btn").toggle(show_field_mapping);
 }
 
 function bs_normalize_rows() {
@@ -287,19 +305,122 @@ function bs_focus_pending_editable() {
 }
 
 async function bs_apply_period_controls(frm) {
-  const month = $("#bs-head-month-select").val() || "";
-  const payroll_frequency = $("#bs-head-frequency").val() || "Monthly";
-  const start_date = $("#bs-head-start-date").val() || "";
-  const end_date = $("#bs-head-end-date").val() || "";
-  const posting_date = $("#bs-head-posting-date").val() || "";
-  await bs_set_doc_values(frm, {
-    month,
-    payroll_frequency,
-    start_date,
-    end_date,
-    posting_date,
-  });
+  const period = bs_read_period_from_header();
+  await bs_set_doc_values(frm, period);
+  Object.assign(frm.doc, period);
   bs_update_header_period(frm);
+  return period;
+}
+
+function bs_read_period_from_header() {
+  return {
+    month: $("#bs-head-month-select").val() || "",
+    payroll_frequency: $("#bs-head-frequency").val() || "Monthly",
+    start_date: $("#bs-head-start-date").val() || "",
+    end_date: $("#bs-head-end-date").val() || "",
+    posting_date: $("#bs-head-posting-date").val() || "",
+  };
+}
+
+function bs_sync_period_from_header(frm) {
+  const period = bs_read_period_from_header();
+  if (period.start_date) frm.doc.start_date = period.start_date;
+  if (period.end_date) frm.doc.end_date = period.end_date;
+  if (period.month) frm.doc.month = period.month;
+  if (period.posting_date) frm.doc.posting_date = period.posting_date;
+  if (period.payroll_frequency) frm.doc.payroll_frequency = period.payroll_frequency;
+  return period;
+}
+
+function bs_period_key(start_date, end_date) {
+  return `${start_date || ""}|${end_date || ""}`;
+}
+
+function bs_needs_days_load(frm) {
+  const mode = frm?.doc?.calculation_mode || "Manual";
+  if (["Checkin Based", "Attendance Based"].includes(mode)) return true;
+  if (mode === "Manual" && ["By Payment Days", "Deduct Absent Days"].includes(frm.doc.manual_salary_basis || "")) {
+    return true;
+  }
+  return false;
+}
+
+function bs_needs_overtime_load(frm) {
+  const ot = bs_get_active_overtime_source(frm);
+  if (ot === "Manual") return false;
+  if (ot === "Employee Checkin Difference") return true;
+  if (ot === "Custom DocType") {
+    return !!(frm.doc.overtime_doctype || bs_control_get_value(window._bs?.source_ctrls?.overtime_doctype));
+  }
+  return false;
+}
+
+function bs_needs_piece_salary_load(frm) {
+  if (!bs_is_piece_mode(frm?.doc?.calculation_mode)) return false;
+  return !!(frm.doc.overtime_doctype || bs_control_get_value(window._bs?.source_ctrls?.overtime_doctype));
+}
+
+function bs_is_source_driven_mode(frm) {
+  return bs_needs_days_load(frm) || bs_needs_overtime_load(frm) || bs_needs_piece_salary_load(frm);
+}
+
+function bs_get_days_attendance_source(frm) {
+  const mode = frm?.doc?.calculation_mode || "Manual";
+  if (mode === "Checkin Based") return "Employee Checkin";
+  if (mode === "Attendance Based") return "Attendance";
+  if (mode === "Manual") return "Attendance";
+  return null;
+}
+
+function bs_should_merge_saved_source_metrics(frm) {
+  if (bs_is_source_driven_mode(frm)) return false;
+  return true;
+}
+
+function bs_clear_row_days(row) {
+  row.payment_days = 0;
+  row.attendance_days = 0;
+  row.absent_days = 0;
+  row.attendance_hours = 0;
+}
+
+function bs_clear_row_overtime_fields(row) {
+  row.ot_input = 0;
+  row.ot_amount = 0;
+  row.overtime_hours = 0;
+  row.worked_hours = 0;
+  row.shift_hours = 0;
+}
+
+function bs_clear_row_piece_salary(row) {
+  row.source_hours = 0;
+  row.source_qty = 0;
+  row.piece_rate = 0;
+  row.source_row_names = [];
+  row.hours_amount = 0;
+  row.qty_amount = 0;
+}
+
+function bs_clear_row_source_metrics(row) {
+  bs_clear_row_days(row);
+  bs_clear_row_overtime_fields(row);
+  bs_clear_row_piece_salary(row);
+}
+
+function bs_clear_all_row_days() {
+  (window._bs.rows || []).forEach(bs_clear_row_days);
+}
+
+function bs_clear_all_row_overtime() {
+  (window._bs.rows || []).forEach(bs_clear_row_overtime_fields);
+}
+
+function bs_clear_all_row_piece_salary() {
+  (window._bs.rows || []).forEach(bs_clear_row_piece_salary);
+}
+
+function bs_clear_all_row_source_metrics() {
+  (window._bs.rows || []).forEach(bs_clear_row_source_metrics);
 }
 
 function bs_bind_control_change(control, handler) {
@@ -324,16 +445,13 @@ async function bs_set_doc_values(frm, values) {
 function bs_get_active_overtime_source(frm) {
   const mode = frm?.doc?.calculation_mode || "Manual";
   const controls = window._bs?.source_ctrls || {};
-  let source = bs_control_get_value(controls.overtime_source)
-    || frm?.doc?.overtime_source
-    || bs_get_default_overtime_source(mode);
-  if (mode === "Checkin Based" && source === "Manual") {
-    source = "Employee Checkin Difference";
-  }
-  return source;
+  const from_ui = bs_control_get_value(controls.overtime_source);
+  if (from_ui) return from_ui;
+  if (frm?.doc?.overtime_source) return frm.doc.overtime_source;
+  return bs_get_default_overtime_source(mode, window._bs?.settings);
 }
 
-function bs_merge_saved_rows_from_frm(frm) {
+function bs_apply_source_metrics_from_doc(frm) {
   if (!frm?.doc?.employees?.length || !window._bs?.rows?.length) return;
   const saved_map = Object.fromEntries(
     frm.doc.employees.filter((row) => row.employee).map((row) => [row.employee, row]),
@@ -341,30 +459,101 @@ function bs_merge_saved_rows_from_frm(frm) {
   window._bs.rows.forEach((row) => {
     const saved = saved_map[row.employee];
     if (!saved) return;
-    row.payment_days = parseFloat(saved.payment_days ?? row.payment_days ?? 0);
-    row.attendance_days = parseFloat(saved.attendance_days ?? row.attendance_days ?? 0);
-    row.absent_days = parseFloat(saved.absent_days ?? row.absent_days ?? 0);
-    row.attendance_hours = parseFloat(saved.attendance_hours ?? row.attendance_hours ?? 0);
-    row.overtime_hours = parseFloat(saved.overtime_hours ?? row.overtime_hours ?? 0);
-    row.worked_hours = parseFloat(saved.worked_hours ?? row.worked_hours ?? 0);
-    row.shift_hours = parseFloat(saved.shift_hours ?? row.shift_hours ?? 0);
-    row.ot_input = parseFloat(saved.ot_input ?? row.ot_input ?? 0);
-    row.ot_amount = parseFloat(saved.ot_amount ?? row.ot_amount ?? 0);
+    row.payment_days = parseFloat(saved.payment_days || 0);
+    row.attendance_days = parseFloat(saved.attendance_days || 0);
+    row.absent_days = parseFloat(saved.absent_days || 0);
+    row.attendance_hours = parseFloat(saved.attendance_hours || 0);
+    row.worked_hours = parseFloat(saved.worked_hours || 0);
+    row.shift_hours = parseFloat(saved.shift_hours || 0);
+    row.overtime_hours = parseFloat(saved.overtime_hours || 0);
+    row.ot_input = parseFloat(saved.ot_input || 0);
+    recalc_row(row);
+  });
+  window._bs.loaded_source_period = bs_period_key(frm.doc.start_date, frm.doc.end_date);
+}
+window.bs_apply_source_metrics_from_doc = bs_apply_source_metrics_from_doc;
+
+function bs_merge_saved_rows_from_frm(frm) {
+  if (!frm?.doc?.employees?.length || !window._bs?.rows?.length) return;
+  const merge_source_metrics = bs_should_merge_saved_source_metrics(frm);
+  const saved_map = Object.fromEntries(
+    frm.doc.employees.filter((row) => row.employee).map((row) => [row.employee, row]),
+  );
+  window._bs.rows.forEach((row) => {
+    const saved = saved_map[row.employee];
+    if (!saved) return;
+    if (merge_source_metrics) {
+      row.payment_days = parseFloat(saved.payment_days ?? row.payment_days ?? 0);
+      row.attendance_days = parseFloat(saved.attendance_days ?? row.attendance_days ?? 0);
+      row.absent_days = parseFloat(saved.absent_days ?? row.absent_days ?? 0);
+      row.attendance_hours = parseFloat(saved.attendance_hours ?? row.attendance_hours ?? 0);
+      row.overtime_hours = parseFloat(saved.overtime_hours ?? row.overtime_hours ?? 0);
+      row.worked_hours = parseFloat(saved.worked_hours ?? row.worked_hours ?? 0);
+      row.shift_hours = parseFloat(saved.shift_hours ?? row.shift_hours ?? 0);
+      row.ot_input = parseFloat(saved.ot_input ?? row.ot_input ?? 0);
+      row.ot_amount = parseFloat(saved.ot_amount ?? row.ot_amount ?? 0);
+    }
   });
 }
 
-async function bs_trigger_source_reload() {
+function bs_clear_row_imported_overtime(row) {
+  row.ot_input = 0;
+  row.ot_amount = 0;
+  row.overtime_hours = 0;
+  row.worked_hours = 0;
+  row.shift_hours = 0;
+  row.source_hours = 0;
+  row.source_qty = 0;
+  row.source_row_names = [];
+}
+
+function bs_apply_overtime_source_to_rows(frm) {
+  const overtime_source = bs_get_active_overtime_source(frm);
+  (window._bs.rows || []).forEach((row) => {
+    if (overtime_source === "Manual") {
+      bs_clear_row_overtime_fields(row);
+    }
+    recalc_row(row);
+  });
+}
+
+async function bs_trigger_source_reload(options = {}) {
+  const force = !!options.force;
+  const scope = options.scope || "all";
   const frm = window._bs.frm;
   if (!frm || !window._bs.rows.length) return;
+  bs_sync_period_from_header(frm);
   await bs_sync_source_doc(frm);
-  const mode = frm.doc.calculation_mode || "Manual";
-  const manual_basis = frm.doc.manual_salary_basis || "Full Month";
-  const should_reload = ["Checkin Based", "Attendance Based"].includes(mode)
-    || (mode === "Manual" && ["By Payment Days", "Deduct Absent Days"].includes(manual_basis))
-    || (bs_is_piece_mode(mode) && bs_get_active_overtime_source(frm) === "Custom DocType" && frm.doc.overtime_doctype)
-    || (["Checkin Based", "Attendance Based"].includes(mode) && bs_get_active_overtime_source(frm) === "Custom DocType" && frm.doc.overtime_doctype);
-  if (!should_reload || !frm.doc.start_date || !frm.doc.end_date) return;
-  await bs_load_source_data({ silent: true });
+  if (!frm.doc.start_date || !frm.doc.end_date) return;
+
+  const load_days = (force || scope === "all" || scope === "days") && bs_needs_days_load(frm);
+  const load_ot = (force || scope === "all" || scope === "overtime") && bs_needs_overtime_load(frm);
+  const load_piece = (force || scope === "all" || scope === "piece") && bs_needs_piece_salary_load(frm);
+
+  if (bs_get_active_overtime_source(frm) === "Manual" && (force || scope === "all" || scope === "overtime")) {
+    bs_apply_overtime_source_to_rows(frm);
+  }
+
+  if (!load_days && !load_ot && !load_piece) {
+    bs_render_table();
+    bs_render_live_summary(frm);
+    return;
+  }
+
+  if (force && scope === "all") {
+    bs_clear_all_row_source_metrics();
+  } else if (force && scope === "days") {
+    bs_clear_all_row_days();
+  } else if (force && scope === "overtime") {
+    bs_clear_all_row_overtime();
+  } else if (force && scope === "piece") {
+    bs_clear_all_row_piece_salary();
+  }
+
+  if (load_days) await bs_load_days_data({ silent: true });
+  if (load_piece) await bs_load_piece_salary_data({ silent: true });
+  if (load_ot) await bs_load_overtime_data({ silent: true });
+
   bs_render_table();
   bs_render_live_summary(frm);
 }
@@ -378,11 +567,11 @@ function bs_collect_source_values(frm) {
     calculation_mode,
     manual_salary_basis: bs_control_get_value(controls.manual_salary_basis) || frm.doc.manual_salary_basis || "Full Month",
     attendance_source: bs_get_mode_attendance_source(calculation_mode),
-    overtime_source: bs_control_get_value(controls.overtime_source) || frm.doc.overtime_source || bs_get_default_overtime_source(calculation_mode),
-    per_piece_basis: bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours",
-    use_hours: $("#bs-global-use-hours").is(":checked") ? 1 : 0,
-    use_qty: $("#bs-global-use-qty").is(":checked") ? 1 : 0,
-    overtime_with_salary: $("#bs-global-overtime-with-salary").is(":checked") ? 1 : 0,
+    overtime_source: bs_control_get_value(controls.overtime_source) || frm.doc.overtime_source || bs_get_default_overtime_source(calculation_mode, window._bs?.settings),
+  per_piece_basis: bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours",
+    use_hours: (bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours") === "Total Hours" ? 1 : 0,
+    use_qty: (bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours") === "Total Qty" ? 1 : 0,
+    overtime_with_salary: 0,
     overtime_doctype: bs_control_get_value(controls.overtime_doctype).trim(),
     overtime_employee_field: bs_control_get_value(controls.overtime_employee_field).trim(),
     overtime_date_field: bs_control_get_value(controls.overtime_date_field).trim(),
@@ -393,7 +582,9 @@ function bs_collect_source_values(frm) {
   return bs_normalize_source_values(raw);
 }
 
-function bs_get_default_overtime_source(mode) {
+function bs_get_default_overtime_source(mode, settings) {
+  const configured = settings?.default_overtime_source;
+  if (configured) return configured;
   if (mode === "Checkin Based") return "Employee Checkin Difference";
   return "Manual";
 }
@@ -401,17 +592,16 @@ function bs_get_default_overtime_source(mode) {
 function bs_normalize_source_values(values) {
   const next = Object.assign({}, values || {});
   const mode = next.calculation_mode || "Manual";
-  if (mode === "Manual") {
-    next.overtime_source = "Manual";
+  if (mode === "Attendance Based" && next.overtime_source === "Employee Checkin Difference") {
+    // allowed — overtime source is independent from days mode
   } else if (!next.overtime_source) {
-    next.overtime_source = bs_get_default_overtime_source(mode);
+    next.overtime_source = bs_get_default_overtime_source(mode, window._bs?.settings);
   }
   if (bs_is_piece_mode(mode)) {
-    if (!next.overtime_source || next.overtime_source === "Employee Checkin Difference") {
-      next.overtime_source = next.overtime_doctype ? "Custom DocType" : "Manual";
-    }
-    next.use_hours = next.overtime_with_salary ? 1 : bs_to_int(next.use_hours, 1);
-    next.use_qty = bs_to_int(next.use_qty, 1);
+    next.per_piece_basis = next.per_piece_basis || "Total Hours";
+    next.use_hours = next.per_piece_basis === "Total Hours" ? 1 : 0;
+    next.use_qty = next.per_piece_basis === "Total Qty" ? 1 : 0;
+    next.overtime_with_salary = 0;
   } else {
     next.per_piece_basis = next.per_piece_basis || "Total Hours";
     next.use_hours = bs_to_int(next.use_hours, 1);
@@ -419,24 +609,13 @@ function bs_normalize_source_values(values) {
   }
   if (next.overtime_source === "Custom DocType") {
     // keep mapping fields
-  } else {
+  } else if (!bs_is_piece_mode(mode)) {
     next.overtime_qty_field = "";
     next.overtime_rate_field = "";
-    if (!bs_is_piece_mode(mode)) {
-      next.overtime_doctype = "";
-      next.overtime_employee_field = "";
-      next.overtime_date_field = "";
-      next.overtime_hours_field = "";
-    }
-  }
-
-  if (mode === "Manual") {
     next.overtime_doctype = "";
     next.overtime_employee_field = "";
     next.overtime_date_field = "";
     next.overtime_hours_field = "";
-    next.overtime_qty_field = "";
-    next.overtime_rate_field = "";
   }
   return next;
 }
@@ -454,42 +633,55 @@ function bs_refresh_source_ui() {
 
   const mode = bs_control_get_value(controls.calculation_mode) || "Manual";
   const use_piece = bs_is_piece_mode(mode);
-  const use_custom = use_piece;
-  const use_attendance_loader = ["Attendance Based", "Checkin Based"].includes(mode);
-  const show_manual_note = mode === "Manual";
-  const overtime_with_salary = $("#bs-global-overtime-with-salary").is(":checked");
-  const show_manual_basis = mode === "Manual" || (use_piece && overtime_with_salary);
-  $(".bs-manual-basis-field").toggle(show_manual_basis);
+  $(".bs-manual-basis-field").toggle(mode === "Manual");
 
-  const overtime_source = bs_control_get_value(controls.overtime_source) || frm.doc.overtime_source || bs_get_default_overtime_source(mode);
-  const show_overtime_source = ["Checkin Based", "Attendance Based", "Per Piece or Per Hour"].includes(mode);
+  const overtime_source = bs_control_get_value(controls.overtime_source) || frm.doc.overtime_source || "Manual";
+  $(".bs-overtime-source-field").toggle(true);
   const show_custom_map = overtime_source === "Custom DocType" || use_piece;
-  $(".bs-overtime-source-field").toggle(show_overtime_source);
   $(".bs-source-map-field").toggle(show_custom_map);
+  bs_refresh_overtime_source_options(mode, overtime_source);
   $(".bs-source-hours-field").toggle(show_custom_map);
   $(".bs-source-map-piece").toggle(show_custom_map && use_piece);
   $(".bs-per-piece-basis-field").toggle(use_piece);
-  $(".bs-piece-mode-option").toggle(use_piece);
-  $("#bs-global-use-hours").prop("checked", overtime_with_salary ? true : $("#bs-global-use-hours").is(":checked"));
-  $("#bs-global-use-hours").prop("disabled", use_piece && overtime_with_salary);
   $("#bs-load-source-btn").toggle(
-    use_attendance_loader
-    || show_custom_map
-    || (mode === "Manual" && ["By Payment Days", "Deduct Absent Days"].includes(frm.doc.manual_salary_basis || "")),
+    bs_needs_days_load(frm) || bs_needs_overtime_load(frm) || bs_needs_piece_salary_load(frm),
   );
+  bs_update_source_mapping_header(frm);
 
-  let note = "Manual mode uses direct entry for base pay and overtime.";
+  let note = "Calculation Mode controls Days / Salary only. Overtime Source controls Overtime column only.";
   if (mode === "Manual") {
     const basis = frm.doc.manual_salary_basis || "Full Month";
-    if (basis === "Full Month") note = "Manual / Full Month: Basic = CTC ÷ 30 × days (default 30). Enter days per employee row.";
-    if (basis === "By Payment Days") note = "Manual / By Payment Days: Basic = CTC ÷ 30 × payment days. Enter payment days per row or load from Attendance.";
-    if (basis === "Deduct Absent Days") note = "Manual / Deduct Absent Days: Basic = CTC ÷ 30 × (30 − absent days). Enter absent days per row or load from Attendance.";
+    if (basis === "Full Month") note = "Days: manual entry (default 30). Overtime: separate — use Overtime Source filter.";
+    if (basis === "By Payment Days") note = "Days: load from Attendance or enter manually. Overtime: separate filter.";
+    if (basis === "Deduct Absent Days") note = "Days: from absent count. Overtime: separate filter.";
   }
-  if (mode === "Attendance Based") note = "Attendance Based: Basic = CTC / 30 × present days. Choose overtime source: Manual, Checkin Difference, or Custom DocType.";
-  if (mode === "Checkin Based") note = "Checkin Based: Basic = CTC / 30 × checkin days. Overtime can load from checkin OUT−IN difference, manual entry, or custom DocType.";
-  if (bs_is_piece_mode(mode)) note = "Per Piece or Per Hour: each employee row can use both Hours and Qty together. Hours use (CTC / 30 / 8) × Hours. Qty uses Qty × Rate.";
-  if (bs_is_piece_mode(mode) && overtime_with_salary) note = "Overtime with Salary: Basic uses Manual Salary Basis (Full Month / Payment Days / Absent deduction). Hours from custom source count as overtime. Qty stays separate.";
+  if (mode === "Attendance Based") note = "Days: from Attendance doctype. Overtime: Manual, Checkin OUT−IN, or Custom — independent.";
+  if (mode === "Checkin Based") note = "Days: from Employee Checkin. Overtime: separate Overtime Source (not mixed with days).";
+  if (bs_is_piece_mode(mode)) {
+    const basis = frm.doc.per_piece_basis || "Total Hours";
+    note = basis === "Total Hours"
+      ? "Salary: Hours × hourly rate from custom source. Overtime: separate Overtime Source only."
+      : "Salary: Qty × rate from custom source. Overtime: separate Overtime Source only.";
+  }
   $("#bs-source-note").text(note);
+}
+
+function bs_refresh_overtime_source_options(mode, current_value) {
+  const controls = window._bs.source_ctrls || {};
+  const $select = controls.overtime_source;
+  if (!$select?.length) return;
+  const options = [
+    { value: "Manual", label: "Manual Entry" },
+    { value: "Employee Checkin Difference", label: "Checkin OUT − IN" },
+    { value: "Custom DocType", label: "Custom DocType" },
+  ];
+  const selected = current_value || $select.val() || options[0].value;
+  $select.empty();
+  options.forEach((opt) => {
+    $select.append(`<option value="${opt.value}">${opt.label}</option>`);
+  });
+  const allowed = options.some((opt) => opt.value === selected);
+  $select.val(allowed ? selected : options[0].value);
 }
 
 async function bs_get_doctype_field_options(doctype_name) {
@@ -503,17 +695,24 @@ async function bs_get_doctype_field_options(doctype_name) {
 }
 
 function bs_filter_source_fields(fields, kind) {
+  const is_rate_field = (df) => {
+    if (["Float", "Currency", "Int", "Percent", "Duration"].includes(df.fieldtype)) return true;
+    const name = String(df.fieldname || "").toLowerCase();
+    return df.fieldtype === "Data" && /rate|piece|amount|price|target|qty|hour/.test(name);
+  };
   const by_kind = {
     employee: (df) => (df.fieldtype === "Link" && df.options === "Employee") || ["Data", "Dynamic Link", "Select"].includes(df.fieldtype),
-    date: (df) => ["Date", "Datetime"].includes(df.fieldtype),
+    date: (df) => ["Date", "Datetime"].includes(df.fieldtype) || String(df.fieldname || "").startsWith("@parent."),
     number: (df) => ["Float", "Currency", "Int", "Percent", "Duration"].includes(df.fieldtype),
+    rate: is_rate_field,
   };
   const matcher = by_kind[kind] || (() => true);
   return (fields || []).filter(matcher);
 }
 
 function bs_fill_field_select($select, fields, current_value, placeholder) {
-  const options = [`<option value="">${placeholder || ""}</option>`]
+  const ph = placeholder || "Select field";
+  const options = [`<option value="" disabled hidden>${frappe.utils.escape_html(ph)}</option>`]
     .concat((fields || []).map((df) => `<option value="${frappe.utils.escape_html(df.fieldname)}">${frappe.utils.escape_html(df.label || df.fieldname)} (${frappe.utils.escape_html(df.fieldname)})</option>`));
   $select.html(options.join(""));
   $select.val(current_value || "");
@@ -524,33 +723,82 @@ function bs_guess_source_field(fields, kind) {
   const list = fields || [];
   const picks = {
     employee: ["employee", "employee_id", "employee_code"],
-    date: ["date", "posting_date", "attendance_date", "checkin_date"],
+    date: ["date", "posting_date", "attendance_date", "checkin_date", "@parent.date"],
     hours: ["hours", "total_hours", "working_hours", "overtime_hours", "total_overtime_hours"],
     qty: ["qty", "quantity", "total_qty", "piece_qty", "production_qty"],
-    rate: ["hourly_rate", "rate", "piece_rate", "per_piece_rate"],
+    rate: ["hourly_rate", "rate", "piece_rate", "per_piece_rate", "rate_per_piece"],
   };
   const wanted = picks[kind] || [];
   const hit = list.find((df) => wanted.includes(String(df.fieldname || "").toLowerCase()));
   return hit?.fieldname || "";
 }
 
+async function bs_restore_source_controls_from_doc(frm) {
+  const controls = window._bs?.source_ctrls || {};
+  if (!frm || !controls.calculation_mode) return;
+  const settings = window._bs.settings || {};
+  const mode = frm.doc.calculation_mode || settings.default_calculation_mode || "Manual";
+  let overtime_source = frm.doc.overtime_source || "";
+  if (!overtime_source) {
+    overtime_source = bs_get_default_overtime_source(mode, window._bs?.settings);
+  }
+  if (mode === "Attendance Based" && overtime_source === "Employee Checkin Difference") {
+    overtime_source = "Manual";
+  }
+  bs_control_set_value(controls.calculation_mode, mode);
+  bs_control_set_value(controls.manual_salary_basis, frm.doc.manual_salary_basis || settings.default_manual_salary_basis || "Full Month");
+  bs_refresh_overtime_source_options(mode, overtime_source);
+  bs_control_set_value(controls.overtime_source, overtime_source);
+  frm.doc.overtime_source = overtime_source;
+  bs_control_set_value(controls.per_piece_basis, frm.doc.per_piece_basis || "Total Hours");
+  if (controls.global_use_hours) {
+    controls.global_use_hours.prop("checked", bs_to_int(frm.doc.use_hours ?? settings.default_use_hours, 1));
+  }
+  if (controls.global_use_qty) {
+    controls.global_use_qty.prop("checked", bs_to_int(frm.doc.use_qty ?? settings.default_use_qty, 1));
+  }
+  if (controls.global_overtime_with_salary) {
+    controls.global_overtime_with_salary.prop("checked", bs_to_int(frm.doc.overtime_with_salary ?? settings.default_overtime_with_salary, 0));
+  }
+  window._bs.global_piece_flags = bs_get_global_piece_flags();
+  const doctype = frm.doc.overtime_doctype || settings.overtime_doctype || "";
+  bs_control_set_value(controls.overtime_doctype, doctype);
+  if (doctype) frm.doc.overtime_doctype = doctype;
+  await bs_refresh_source_field_options(frm);
+  bs_refresh_source_ui();
+}
+window.bs_restore_source_controls_from_doc = bs_restore_source_controls_from_doc;
+
 async function bs_refresh_source_field_options(frm) {
   const controls = window._bs.source_ctrls || {};
-  const doctype_name = bs_control_get_value(controls.overtime_doctype);
+  const doctype_name = bs_control_get_value(controls.overtime_doctype) || frm.doc.overtime_doctype || "";
+  if (!doctype_name) {
+    ["overtime_employee_field", "overtime_date_field", "overtime_hours_field", "overtime_qty_field", "overtime_rate_field"].forEach((key) => {
+      if (controls[key]) bs_fill_field_select(controls[key], [], "", "Select field");
+    });
+    return;
+  }
   const fields = await bs_get_doctype_field_options(doctype_name);
   const employee_fields = bs_filter_source_fields(fields, "employee");
   const date_fields = bs_filter_source_fields(fields, "date");
   const number_fields = bs_filter_source_fields(fields, "number");
-  frm.doc.overtime_employee_field = frm.doc.overtime_employee_field || bs_guess_source_field(employee_fields, "employee");
-  frm.doc.overtime_date_field = frm.doc.overtime_date_field || bs_guess_source_field(date_fields, "date");
-  frm.doc.overtime_hours_field = frm.doc.overtime_hours_field || bs_guess_source_field(number_fields, "hours");
-  frm.doc.overtime_qty_field = frm.doc.overtime_qty_field || bs_guess_source_field(number_fields, "qty");
-  frm.doc.overtime_rate_field = frm.doc.overtime_rate_field || bs_guess_source_field(number_fields, "rate");
-  bs_fill_field_select(controls.overtime_employee_field, employee_fields, frm.doc.overtime_employee_field, "Select employee field");
-  bs_fill_field_select(controls.overtime_date_field, date_fields, frm.doc.overtime_date_field, "Select date field");
-  bs_fill_field_select(controls.overtime_hours_field, number_fields, frm.doc.overtime_hours_field, "Select total hours field");
-  bs_fill_field_select(controls.overtime_qty_field, number_fields, frm.doc.overtime_qty_field, "Select total qty field");
-  bs_fill_field_select(controls.overtime_rate_field, number_fields, frm.doc.overtime_rate_field, "Select rate per piece field");
+  const rate_fields = bs_filter_source_fields(fields, "rate");
+  const settings = window._bs.settings || {};
+  const pick = (doc_key, control_key, guess_kind, field_list) => {
+    const saved = (frm.doc[doc_key] || bs_control_get_value(controls[control_key]) || "").trim();
+    if (saved && (field_list || []).some((df) => df.fieldname === saved)) return saved;
+    return saved || settings[doc_key] || bs_guess_source_field(field_list, guess_kind);
+  };
+  frm.doc.overtime_employee_field = pick("overtime_employee_field", "overtime_employee_field", "employee", employee_fields);
+  frm.doc.overtime_date_field = pick("overtime_date_field", "overtime_date_field", "date", date_fields);
+  frm.doc.overtime_hours_field = pick("overtime_hours_field", "overtime_hours_field", "hours", number_fields);
+  frm.doc.overtime_qty_field = pick("overtime_qty_field", "overtime_qty_field", "qty", number_fields);
+  frm.doc.overtime_rate_field = pick("overtime_rate_field", "overtime_rate_field", "rate", rate_fields);
+  bs_fill_field_select(controls.overtime_employee_field, employee_fields, frm.doc.overtime_employee_field, "Employee Field");
+  bs_fill_field_select(controls.overtime_date_field, date_fields, frm.doc.overtime_date_field, "Date Field");
+  bs_fill_field_select(controls.overtime_hours_field, number_fields, frm.doc.overtime_hours_field, "Hours Field");
+  bs_fill_field_select(controls.overtime_qty_field, number_fields, frm.doc.overtime_qty_field, "Qty Field");
+  bs_fill_field_select(controls.overtime_rate_field, rate_fields, frm.doc.overtime_rate_field, "Rate Field");
 }
 
 async function bs_bind_source_controls(frm, settings, $wrap) {
@@ -563,9 +811,14 @@ async function bs_bind_source_controls(frm, settings, $wrap) {
         fieldtype: "Link",
         label: "",
         options,
-        placeholder: "Custom DocType",
+        placeholder: "Source DocType",
       },
       render_input: true,
+    });
+    ctrl.get_query = () => ({
+      filters: {
+        issingle: 0,
+      },
     });
     ctrl.refresh();
     return ctrl;
@@ -589,15 +842,18 @@ async function bs_bind_source_controls(frm, settings, $wrap) {
   window._bs.source_ctrls = source_ctrls;
 
   bs_control_set_value(source_ctrls.calculation_mode, frm.doc.calculation_mode || "Manual");
-  bs_control_set_value(source_ctrls.manual_salary_basis, frm.doc.manual_salary_basis || "Full Month");
-  let overtime_source = frm.doc.overtime_source || bs_get_default_overtime_source(frm.doc.calculation_mode || "Manual");
-  if ((frm.doc.calculation_mode || "Manual") === "Checkin Based" && overtime_source === "Manual") {
-    overtime_source = "Employee Checkin Difference";
+  bs_control_set_value(source_ctrls.manual_salary_basis, frm.doc.manual_salary_basis || settings.default_manual_salary_basis || "Full Month");
+  const bind_mode = frm.doc.calculation_mode || "Manual";
+  let overtime_source = frm.doc.overtime_source || "";
+  if (!overtime_source) {
+    overtime_source = bs_get_default_overtime_source(bind_mode, settings);
   }
-  if ((frm.doc.calculation_mode || "Manual") === "Checkin Based" && overtime_source === "Employee Checkin Difference") {
-    frm.doc.overtime_source = overtime_source;
+  if (bind_mode === "Attendance Based" && overtime_source === "Employee Checkin Difference") {
+    overtime_source = "Manual";
   }
+  bs_refresh_overtime_source_options(bind_mode, overtime_source);
   bs_control_set_value(source_ctrls.overtime_source, overtime_source);
+  frm.doc.overtime_source = overtime_source;
   bs_control_set_value(source_ctrls.per_piece_basis, frm.doc.per_piece_basis || "Total Hours");
   source_ctrls.global_use_hours.prop("checked", bs_to_int(settings.default_use_hours, 1));
   source_ctrls.global_use_qty.prop("checked", bs_to_int(settings.default_use_qty, 1));
@@ -613,7 +869,17 @@ async function bs_bind_source_controls(frm, settings, $wrap) {
         const normalized = bs_normalize_source_values(bs_collect_source_values(frm));
         Object.assign(frm.doc, normalized);
         if (key === "calculation_mode") {
+          const settings = window._bs.settings || {};
+          if (normalized.overtime_source === "Custom DocType") {
+            if (!normalized.overtime_doctype) {
+              normalized.overtime_doctype = frm.doc.overtime_doctype || settings.overtime_doctype || "";
+            }
+            if (normalized.overtime_doctype) {
+              bs_control_set_value(source_ctrls.overtime_doctype, normalized.overtime_doctype);
+            }
+          }
           bs_control_set_value(source_ctrls.overtime_source, normalized.overtime_source);
+          bs_refresh_overtime_source_options(normalized.calculation_mode, normalized.overtime_source);
         }
         bs_control_set_value(source_ctrls.per_piece_basis, normalized.per_piece_basis || "Total Hours");
       }
@@ -621,12 +887,31 @@ async function bs_bind_source_controls(frm, settings, $wrap) {
       if (["overtime_doctype", "calculation_mode", "manual_salary_basis", "overtime_source", "per_piece_basis"].includes(key)) {
         await bs_refresh_source_field_options(frm);
       }
+      if (["calculation_mode", "manual_salary_basis"].includes(key) && window._bs.rows.length) {
+        await bs_trigger_source_reload({ force: true, scope: "days" });
+        if (bs_is_piece_mode(frm.doc.calculation_mode)) {
+          await bs_trigger_source_reload({ force: true, scope: "piece" });
+        }
+        return;
+      }
+      if (["per_piece_basis"].includes(key) && window._bs.rows.length) {
+        await bs_trigger_source_reload({ force: true, scope: "piece" });
+        return;
+      }
       if ([
-        "calculation_mode", "manual_salary_basis", "overtime_source", "per_piece_basis",
         "overtime_doctype", "overtime_employee_field", "overtime_date_field",
         "overtime_hours_field", "overtime_qty_field", "overtime_rate_field",
       ].includes(key) && window._bs.rows.length) {
-        await bs_trigger_source_reload();
+        if (bs_is_piece_mode(frm.doc.calculation_mode)) {
+          await bs_trigger_source_reload({ force: true, scope: "piece" });
+        }
+        if (bs_get_active_overtime_source(frm) === "Custom DocType") {
+          await bs_trigger_source_reload({ force: true, scope: "overtime" });
+        }
+        return;
+      }
+      if (["overtime_source"].includes(key) && window._bs.rows.length) {
+        await bs_trigger_source_reload({ force: true, scope: "overtime" });
         return;
       }
       bs_update_header_period(frm);
@@ -636,29 +921,29 @@ async function bs_bind_source_controls(frm, settings, $wrap) {
     });
   });
 
-  source_ctrls.global_use_hours.on("change", () => bs_apply_global_piece_flags_to_rows());
-  source_ctrls.global_use_qty.on("change", () => bs_apply_global_piece_flags_to_rows());
-  source_ctrls.global_overtime_with_salary.on("change", () => {
-    bs_refresh_source_ui();
-    bs_apply_global_piece_flags_to_rows();
+  source_ctrls.per_piece_basis.on("change", () => {
+    const basis = bs_control_get_value(source_ctrls.per_piece_basis) || "Total Hours";
+    source_ctrls.global_use_hours.prop("checked", basis === "Total Hours");
+    source_ctrls.global_use_qty.prop("checked", basis === "Total Qty");
   });
 
   await bs_sync_source_doc(frm);
   bs_refresh_source_ui();
 }
 
-function render_main_ui(frm) {
+async function render_main_ui(frm) {
   window._bs.frm     = frm;
   window._bs.rows    = [];
   window._bs.counter = 0;
   window._bs.global_piece_flags = null;
   const settings = window._bs.settings || bs_default_settings();
-  settings.enable_component_configuration = 0;
   bs_apply_source_defaults(frm, settings);
   const saved_components_map = bs_get_saved_components_map(frm);
   const show_fetch_filters = !!(settings.enable_filter_fetch && (bs_to_int(settings.show_department_filter, 1) || bs_to_int(settings.show_branch_filter, 1) || bs_to_int(settings.show_designation_filter, 1)));
   const show_manual_employee = !!(settings.enable_manual_add && bs_to_int(settings.show_employee_filter, 1));
   const show_filter_row = true;
+
+  const source_driven = bs_is_source_driven_mode(frm);
 
   // Restore from saved draft
   if (frm.doc.employees && frm.doc.employees.length) {
@@ -673,8 +958,8 @@ function render_main_ui(frm) {
         designation:    r.designation   || "",
         ctc:            parseFloat(r.ctc || 0),
         ot_type:        "hours",
-        ot_input:       parseFloat(r.ot_input || 0),
-        ot_amount:      parseFloat(r.ot_amount || 0),
+        ot_input:       source_driven ? 0 : parseFloat(r.ot_input || 0),
+        ot_amount:      source_driven ? 0 : parseFloat(r.ot_amount || 0),
         bonus_amount:   parseFloat(r.bonus_amount || 0),
         other_allowance:parseFloat(r.other_allowance || 0),
         source_hours:   parseFloat(r.source_hours || 0),
@@ -684,13 +969,13 @@ function render_main_ui(frm) {
         use_qty:        ("use_qty" in r) ? parseInt(r.use_qty || 0, 10) : 1,
         overtime_with_salary: ("overtime_with_salary" in frm.doc) ? parseInt(frm.doc.overtime_with_salary || 0, 10) : bs_to_int(settings.default_overtime_with_salary, 0),
         source_row_names: [],
-        attendance_days:parseFloat(r.attendance_days || 0),
-        absent_days:    parseFloat(r.absent_days || 0),
-        attendance_hours:parseFloat(r.attendance_hours || 0),
-        payment_days:   parseFloat(r.payment_days || 0) || (frm.doc.calculation_mode === "Manual" ? 30 : 0),
-        worked_hours:   parseFloat(r.worked_hours || 0),
-        shift_hours:    parseFloat(r.shift_hours || 0),
-        overtime_hours: parseFloat(r.overtime_hours || 0),
+        attendance_days: source_driven ? 0 : parseFloat(r.attendance_days || 0),
+        absent_days:    source_driven ? 0 : parseFloat(r.absent_days || 0),
+        attendance_hours: source_driven ? 0 : parseFloat(r.attendance_hours || 0),
+        payment_days:   source_driven ? 0 : (parseFloat(r.payment_days || 0) || (frm.doc.calculation_mode === "Manual" ? 30 : 0)),
+        worked_hours:   source_driven ? 0 : parseFloat(r.worked_hours || 0),
+        shift_hours:    source_driven ? 0 : parseFloat(r.shift_hours || 0),
+        overtime_hours: source_driven ? 0 : parseFloat(r.overtime_hours || 0),
         gross:          parseFloat(r.gross_pay || r.gross || 0),
         advances:       [],
         advance_balance:parseFloat(r.advance_balance || 0),
@@ -738,119 +1023,162 @@ function render_main_ui(frm) {
   const $wrap = $(`
     <div id="bs-main-wrap"><div class="bs-wrap">
 
-      <!-- Header -->
-      <div class="bs-header-card">
-        <div class="bs-header-main">
-          <div class="bs-header-icon">SAL</div>
-          <div>
-            <div class="bs-header-title">Bulk Salary Creation</div>
-            <div class="bs-header-sub">
-              Fetch or add employees → enter overtime → review advances → create slips → pay.
-            </div>
-            <div class="bs-header-period-bar">
-              <select id="bs-head-month-select" class="bs-select-sm">
-                <option value="">Month</option>
-                ${BS_MONTHS.map((month) => `<option value="${month}" ${frm.doc.month === month ? "selected" : ""}>${month}</option>`).join("")}
-              </select>
-              <select id="bs-head-frequency" class="bs-select-sm">
-                ${["Monthly","Bimonthly","Fortnightly","Weekly","Daily"].map((freq) => `<option value="${freq}" ${(frm.doc.payroll_frequency || "Monthly") === freq ? "selected" : ""}>${freq}</option>`).join("")}
-              </select>
-              <input id="bs-head-start-date" class="bs-select-sm bs-date-sm" type="date" value="${frm.doc.start_date || ""}" />
-              <input id="bs-head-end-date" class="bs-select-sm bs-date-sm" type="date" value="${frm.doc.end_date || ""}" />
-              <span class="bs-head-inline-label">Posting Date</span><input id="bs-head-posting-date" class="bs-select-sm bs-date-sm" type="date" value="${frm.doc.posting_date || ""}" />
+      <div class="bs-title-container">
+        <div class="bs-header-top">
+          <div class="bs-header-main">
+            <div class="bs-header-icon">SAL</div>
+            <div>
+              <div class="bs-header-title">Bulk Salary Creation</div>
+              <div class="bs-header-period-bar">
+                <select id="bs-head-month-select" class="bs-select-sm">
+                  <option value="" disabled hidden>Month</option>
+                  ${BS_MONTHS.map((month) => `<option value="${month}" ${frm.doc.month === month ? "selected" : ""}>${month}</option>`).join("")}
+                </select>
+                <select id="bs-head-frequency" class="bs-select-sm">
+                  ${["Monthly","Bimonthly","Fortnightly","Weekly","Daily"].map((freq) => `<option value="${freq}" ${(frm.doc.payroll_frequency || "Monthly") === freq ? "selected" : ""}>${freq}</option>`).join("")}
+                </select>
+                <input id="bs-head-start-date" class="bs-select-sm bs-date-sm" type="date" value="${frm.doc.start_date || ""}" />
+                <input id="bs-head-end-date" class="bs-select-sm bs-date-sm" type="date" value="${frm.doc.end_date || ""}" />
+                <span class="bs-head-inline-label">Posting Date</span><input id="bs-head-posting-date" class="bs-select-sm bs-date-sm" type="date" value="${frm.doc.posting_date || ""}" />
+              </div>
             </div>
           </div>
-        </div>
-        <div class="bs-header-tools">
-          <div class="bs-header-meta">
-            <span class="bs-head-pill" id="bs-head-month">${frm.doc.month || "Month not selected"}</span>
-            <span class="bs-head-pill" id="bs-head-period">${frm.doc.start_date && frm.doc.end_date ? `${frm.doc.start_date} → ${frm.doc.end_date}` : "Period not selected"}</span>
+          <div class="bs-header-tools">
+            <div class="bs-header-meta">
+              <span class="bs-head-pill" id="bs-head-month">${frm.doc.month || "Month not selected"}</span>
+              <span class="bs-head-pill" id="bs-head-period">${frm.doc.start_date && frm.doc.end_date ? `${frm.doc.start_date} → ${frm.doc.end_date}` : "Period not selected"}</span>
+            </div>
+            <button class="bs-btn-secondary" id="bs-toggle-filters-btn">☰ Field Mapping</button>
           </div>
-          <button class="bs-btn-secondary" id="bs-toggle-filters-btn">Filters & Settings</button>
         </div>
-      </div>
 
-      <div id="bs-filters-area" class="bs-filters-area is-hidden">
-      <div class="bs-filter-card" id="bs-filter-panel">
-        <div class="bs-filter-sections-grid">
         ${show_filter_row ? `
-        <div class="bs-filter-section bs-filter-section-find">
-          <div class="bs-filter-section-title">Find Employees</div>
-          <div class="bs-filter-grid-find">
-            <div class="bs-filter-field bs-floating-field"><label>Company</label><div id="bs-company-wrap"></div></div>
-            ${bs_to_int(settings.show_department_filter, 1) ? `<div class="bs-filter-field bs-floating-field"><label>Department</label><div id="bs-dept-wrap"></div></div>` : ``}
-            ${bs_to_int(settings.show_branch_filter, 1) ? `<div class="bs-filter-field bs-floating-field"><label>Branch</label><div id="bs-branch-wrap"></div></div>` : ``}
-            ${bs_to_int(settings.show_designation_filter, 1) ? `<div class="bs-filter-field bs-floating-field"><label>Designation</label><div id="bs-desig-wrap"></div></div>` : ``}
-            ${show_manual_employee ? `<div class="bs-filter-field bs-floating-field bs-filter-field-full"><label>Add Employee</label><div id="bs-emp-link-wrap"></div></div>` : ``}
+        <div class="bs-title-section bs-filter-stack">
+          <div class="bs-inline-filter-row bs-find-employees-bar">
+            <div class="bs-row-title">Find Employees</div>
+            <div class="bs-inline-filter-fields">
+              <div class="bs-filter-field bs-filter-field-inline"><div id="bs-company-wrap"></div></div>
+              ${bs_to_int(settings.show_department_filter, 1) ? `<div class="bs-filter-field bs-filter-field-inline"><div id="bs-dept-wrap"></div></div>` : ``}
+              ${bs_to_int(settings.show_branch_filter, 1) ? `<div class="bs-filter-field bs-filter-field-inline"><div id="bs-branch-wrap"></div></div>` : ``}
+              ${bs_to_int(settings.show_designation_filter, 1) ? `<div class="bs-filter-field bs-filter-field-inline"><div id="bs-desig-wrap"></div></div>` : ``}
+              ${show_manual_employee ? `<div class="bs-filter-field bs-filter-field-inline"><div id="bs-emp-link-wrap"></div></div>` : ``}
+            </div>
           </div>
-          <div class="bs-filter-actions-row">
-            ${show_fetch_filters ? `<button class="bs-btn-primary bs-filter-action-btn" id="bs-fetch-btn">Fetch Employees</button>` : ``}
-            ${show_manual_employee ? `<button class="bs-btn-secondary bs-filter-action-btn" id="bs-add-btn">Add Selected</button>` : ``}
+
+          <div class="bs-inline-filter-row bs-calculation-bar">
+            <div class="bs-row-title">Calculation</div>
+            <div class="bs-inline-filter-fields">
+              <div class="bs-filter-field bs-filter-field-inline">
+                <select id="bs-calculation-mode" class="bs-select-sm bs-select-full" title="Mode">
+                  <option value="" disabled hidden>Mode</option>
+                  <option value="Manual">Manual</option>
+                  <option value="Attendance Based">Attendance Based</option>
+                  <option value="Checkin Based">Checkin Based</option>
+                  <option value="Per Piece or Per Hour">Per Piece or Per Hour</option>
+                </select>
+              </div>
+              <div class="bs-filter-field bs-filter-field-inline bs-overtime-source-field">
+                <select id="bs-overtime-source" class="bs-select-sm bs-select-full" title="Overtime Source">
+                  <option value="" disabled hidden>Overtime Source</option>
+                  <option value="Manual">Manual Entry</option>
+                  <option value="Employee Checkin Difference">Checkin OUT − IN</option>
+                  <option value="Custom DocType">Custom DocType</option>
+                </select>
+              </div>
+              <div class="bs-filter-field bs-filter-field-inline bs-manual-basis-field">
+                <select id="bs-manual-salary-basis" class="bs-select-sm bs-select-full" title="Salary Basis">
+                  <option value="" disabled hidden>Salary Basis</option>
+                  <option value="Full Month">Full Month</option>
+                  <option value="By Payment Days">By Payment Days</option>
+                  <option value="Deduct Absent Days">Deduct Absent Days</option>
+                </select>
+              </div>
+              <div class="bs-filter-field bs-filter-field-inline bs-per-piece-basis-field">
+                <select id="bs-per-piece-basis" class="bs-select-sm bs-select-full" title="Piece Basis">
+                  <option value="" disabled hidden>Piece Basis</option>
+                  <option value="Total Hours">Total Hours</option>
+                  <option value="Total Qty">Total Qty</option>
+                </select>
+              </div>
+              <input id="bs-global-use-hours" type="checkbox" hidden />
+              <input id="bs-global-use-qty" type="checkbox" hidden />
+              <input id="bs-global-overtime-with-salary" type="checkbox" hidden />
+            </div>
+          </div>
+
+          <div class="bs-inline-filter-row bs-employee-actions-row">
+            <div class="bs-row-title bs-row-title-spacer"></div>
+            <div class="bs-inline-filter-actions">
+              ${show_fetch_filters ? `<button class="bs-btn-primary bs-filter-action-btn" id="bs-fetch-btn">Fetch Employees</button>` : ``}
+              ${show_manual_employee ? `<button class="bs-btn-secondary bs-filter-action-btn" id="bs-add-btn">Add Selected</button>` : ``}
+            </div>
           </div>
         </div>
-        ` : `<div></div>`}
-        <div class="bs-filter-section bs-filter-section-calc">
-          <div class="bs-filter-section-title">Calculation</div>
-          <div class="bs-filter-grid-calc">
-            <div class="bs-filter-field bs-filter-field-stack">
-              <label class="bs-piece-filter-check bs-piece-mode-option"><input id="bs-global-use-hours" type="checkbox" /> Hours</label>
-              <label>Mode</label>
-              <select id="bs-calculation-mode" class="bs-select-sm bs-select-full">
-                <option value="">Calculation Mode</option>
+        ` : `
+        <div class="bs-title-section bs-inline-filter-row bs-calculation-bar">
+          <div class="bs-row-title">Calculation</div>
+          <div class="bs-inline-filter-fields">
+            <div class="bs-filter-field bs-filter-field-inline">
+              <select id="bs-calculation-mode" class="bs-select-sm bs-select-full" title="Mode">
+                <option value="" disabled hidden>Mode</option>
                 <option value="Manual">Manual</option>
                 <option value="Attendance Based">Attendance Based</option>
                 <option value="Checkin Based">Checkin Based</option>
                 <option value="Per Piece or Per Hour">Per Piece or Per Hour</option>
               </select>
             </div>
-            <div class="bs-filter-field bs-filter-field-stack bs-overtime-source-field">
-              <label>Overtime Source</label>
-              <select id="bs-overtime-source" class="bs-select-sm bs-select-full">
-                <option value="">Overtime Source</option>
+            <div class="bs-filter-field bs-filter-field-inline bs-overtime-source-field">
+              <select id="bs-overtime-source" class="bs-select-sm bs-select-full" title="Overtime Source">
+                <option value="" disabled hidden>Overtime Source</option>
                 <option value="Manual">Manual Entry</option>
                 <option value="Employee Checkin Difference">Checkin OUT − IN</option>
                 <option value="Custom DocType">Custom DocType</option>
               </select>
             </div>
-            <div class="bs-filter-field bs-filter-field-stack bs-manual-basis-field">
-              <label class="bs-piece-filter-check bs-piece-mode-option"><input id="bs-global-use-qty" type="checkbox" /> Qty</label>
-              <label>Salary Basis</label>
-              <select id="bs-manual-salary-basis" class="bs-select-sm bs-select-full">
-                <option value="">Salary Basis</option>
+            <div class="bs-filter-field bs-filter-field-inline bs-manual-basis-field">
+              <select id="bs-manual-salary-basis" class="bs-select-sm bs-select-full" title="Salary Basis">
+                <option value="" disabled hidden>Salary Basis</option>
                 <option value="Full Month">Full Month</option>
                 <option value="By Payment Days">By Payment Days</option>
                 <option value="Deduct Absent Days">Deduct Absent Days</option>
               </select>
             </div>
-            <div class="bs-filter-field bs-filter-field-stack bs-per-piece-basis-field">
-              <label class="bs-piece-filter-check bs-piece-mode-option"><input id="bs-global-overtime-with-salary" type="checkbox" /> OT+Salary</label>
-              <label>Piece Basis</label>
-              <select id="bs-per-piece-basis" class="bs-select-sm bs-select-full">
-                <option value="">Per Piece Basis</option>
+            <div class="bs-filter-field bs-filter-field-inline bs-per-piece-basis-field">
+              <select id="bs-per-piece-basis" class="bs-select-sm bs-select-full" title="Piece Basis">
+                <option value="" disabled hidden>Piece Basis</option>
                 <option value="Total Hours">Total Hours</option>
                 <option value="Total Qty">Total Qty</option>
               </select>
             </div>
+            <input id="bs-global-use-hours" type="checkbox" hidden />
+            <input id="bs-global-use-qty" type="checkbox" hidden />
+            <input id="bs-global-overtime-with-salary" type="checkbox" hidden />
           </div>
         </div>
-        <div class="bs-filter-section bs-filter-section-source bs-source-section">
-          <div class="bs-filter-section-title">Source Mapping</div>
-          <div class="bs-filter-grid-source">
-            <div class="bs-filter-field bs-source-map-field bs-filter-field-full"><label>Source DocType</label><div id="bs-overtime-doctype-wrap"></div></div>
-            <div class="bs-filter-field bs-source-map-field"><label>Employee Field</label><select id="bs-overtime-employee-field" class="bs-select-sm bs-select-full"><option value="">Employee Field</option></select></div>
-            <div class="bs-filter-field bs-source-map-field"><label>Date Field</label><select id="bs-overtime-date-field" class="bs-select-sm bs-select-full"><option value="">Date Field</option></select></div>
-            <div class="bs-filter-field bs-source-map-field bs-source-map-piece"><label>Qty Field</label><select id="bs-overtime-qty-field" class="bs-select-sm bs-select-full"><option value="">Qty Field</option></select></div>
-            <div class="bs-filter-field bs-source-map-field bs-source-map-piece"><label>Rate Field</label><select id="bs-overtime-rate-field" class="bs-select-sm bs-select-full"><option value="">Rate Field</option></select></div>
-            <div class="bs-filter-field bs-source-map-field bs-source-hours-field"><label>Hours Field</label><select id="bs-overtime-hours-field" class="bs-select-sm bs-select-full"><option value="">Hours Field</option></select></div>
+        `}
+      </div>
+
+      <div id="bs-filters-area" class="bs-filters-area is-hidden">
+      <div class="bs-filter-card" id="bs-filter-panel">
+        <div class="bs-source-mapping-panel bs-source-section">
+          <div class="bs-source-mapping-row">
+            <div class="bs-row-title bs-row-title-source">Source Mapping</div>
+            <div class="bs-source-mapping-fields">
+              <div class="bs-source-map-field bs-source-doctype-cell"><div id="bs-overtime-doctype-wrap"></div></div>
+              <div class="bs-source-map-field"><select id="bs-overtime-employee-field" class="bs-select-sm bs-select-full" title="Employee Field"><option value="" disabled hidden>Employee Field</option></select></div>
+              <div class="bs-source-map-field"><select id="bs-overtime-date-field" class="bs-select-sm bs-select-full" title="Date Field"><option value="" disabled hidden>Date Field</option></select></div>
+              <div class="bs-source-map-field bs-source-hours-field"><select id="bs-overtime-hours-field" class="bs-select-sm bs-select-full" title="Hours Field"><option value="" disabled hidden>Hours Field</option></select></div>
+              <div class="bs-source-map-field bs-source-map-piece"><select id="bs-overtime-qty-field" class="bs-select-sm bs-select-full" title="Qty Field"><option value="" disabled hidden>Qty Field</option></select></div>
+              <div class="bs-source-map-field bs-source-map-piece"><select id="bs-overtime-rate-field" class="bs-select-sm bs-select-full" title="Rate Field"><option value="" disabled hidden>Rate Field</option></select></div>
+              <div class="bs-source-mapping-actions">
+                <button class="bs-btn-secondary bs-filter-action-btn" id="bs-load-source-btn" style="display:none">Load Source Data</button>
+              </div>
+            </div>
           </div>
-          <div class="bs-filter-actions-row">
-            <button class="bs-btn-secondary bs-filter-action-btn" id="bs-load-source-btn" style="display:none">Load Source Data</button>
-          </div>
-        </div>
         </div>
         <div id="bs-fetch-notice" style="display:none" class="bs-notice bs-notice-info"></div>
         <div id="bs-add-notice" style="display:none" class="bs-notice bs-notice-warn"></div>
-        <div id="bs-source-note" class="bs-source-note-hidden"></div>
+        <div id="bs-source-note" class="bs-source-note"></div>
       </div>
       ${settings.enable_component_configuration ? `
       <div class="bs-panel bs-mb" id="bs-component-panel" style="display:none">
@@ -1032,7 +1360,7 @@ function render_main_ui(frm) {
   $wrap.find("#bs-load-source-btn").on("click",    () => bs_load_source_data());
   $wrap.find("#bs-toggle-filters-btn").on("click", function () {
     $wrap.find("#bs-filters-area").toggleClass("is-hidden");
-    $(this).text($wrap.find("#bs-filters-area").hasClass("is-hidden") ? "☰ Filters" : "✕ Close Filters");
+    $(this).text($wrap.find("#bs-filters-area").hasClass("is-hidden") ? "☰ Field Mapping" : "✕ Close Mapping");
   });
   $wrap.find("#bs-head-month-select").on("change", async function () {
     const month = $(this).val() || "";
@@ -1041,15 +1369,21 @@ function render_main_ui(frm) {
     } else {
       await bs_apply_period_controls(frm);
     }
+    bs_sync_period_from_header(frm);
     if (window._bs.rows.length) {
+      bs_clear_all_row_source_metrics();
+      window._bs.loaded_source_period = "";
       await bs_refresh_structure_assignments(window._bs.rows);
-      await bs_trigger_source_reload();
+      await bs_trigger_source_reload({ force: true });
     }
   });
   $wrap.find("#bs-head-frequency, #bs-head-start-date, #bs-head-end-date, #bs-head-posting-date").on("change", async function () {
     await bs_apply_period_controls(frm);
+    bs_sync_period_from_header(frm);
     if (window._bs.rows.length) {
-      await bs_trigger_source_reload();
+      bs_clear_all_row_source_metrics();
+      window._bs.loaded_source_period = "";
+      await bs_trigger_source_reload({ force: true });
     }
   });
   $wrap.find("#bs-search-input").on("input", function () {
@@ -1063,7 +1397,8 @@ function render_main_ui(frm) {
     bs_render_table();
   });
 
-  bs_bind_source_controls(frm, settings, $wrap);
+  await bs_bind_source_controls(frm, settings, $wrap);
+  await bs_restore_source_controls_from_doc(frm);
   bs_update_header_period(frm);
   $(document).off("mousedown.bsfilters").on("mousedown.bsfilters", function (e) {
     const $target = $(e.target);
@@ -1078,14 +1413,20 @@ function render_main_ui(frm) {
     if (bs_auto_hide_filters_enabled()) bs_hide_filters();
   });
 
-  const finish_init = () => {
+  const finish_init = async () => {
     bs_merge_saved_rows_from_frm(frm);
-    window._bs.rows.forEach(recalc_row);
+    await bs_restore_source_controls_from_doc(frm);
+    const saved_ot_source = bs_get_active_overtime_source(frm);
+    if (saved_ot_source === "Manual") {
+      bs_apply_overtime_source_to_rows(frm);
+    } else {
+      window._bs.rows.forEach(recalc_row);
+    }
     bs_render_table();
     bs_render_live_summary(frm);
     if (typeof bs_tidy_form_after_ui === "function") bs_tidy_form_after_ui(frm);
     bs_auto_fetch_pending_advances().catch((e) => console.warn("Advance auto-fetch:", e));
-    bs_trigger_source_reload().catch((e) => console.warn("Source auto-load:", e));
+    await bs_trigger_source_reload({ force: true });
   };
 
   if (window._bs.rows.length) {
@@ -1897,8 +2238,8 @@ function bs_render_table() {
     </div>`;
 
   container.innerHTML = `
-    ${toolbar}
     <div class="bs-table-scroll">
+      ${toolbar}
       <table class="bs-table">
         <colgroup>
           <col class="bs-col-emp"><col class="bs-col-dept"><col class="bs-col-ctc"><col class="bs-col-salary"><col class="bs-col-work"><col class="bs-col-comp">
@@ -2364,6 +2705,7 @@ function recalc_row(row) {
   const mode = frm.doc.calculation_mode || "Manual";
   const daily = row.ctc / 30;
   const hourly = daily / 8;
+  const piece_basis = frm.doc.per_piece_basis || "Total Hours";
 
   row.attendance_days = parseFloat(row.attendance_days || 0);
   row.absent_days = parseFloat(row.absent_days || 0);
@@ -2372,59 +2714,41 @@ function recalc_row(row) {
   row.source_hours = parseFloat(row.source_hours || 0);
   row.source_qty = parseFloat(row.source_qty || 0);
   row.piece_rate = parseFloat(row.piece_rate || 0);
-  row.use_hours = parseInt(row.use_hours ?? 1, 10) ? 1 : 0;
-  row.use_qty = parseInt(row.use_qty ?? 1, 10) ? 1 : 0;
-  row.overtime_with_salary = parseInt(row.overtime_with_salary ?? 0, 10) ? 1 : 0;
-  if (row.overtime_with_salary) row.use_hours = 1;
+  row.use_hours = piece_basis === "Total Hours" ? 1 : 0;
+  row.use_qty = piece_basis === "Total Qty" ? 1 : 0;
+  row.overtime_with_salary = 0;
   row.ot_input = parseFloat(row.ot_input || 0);
   row.worked_hours = parseFloat(row.worked_hours || 0);
   row.shift_hours = parseFloat(row.shift_hours || 0);
   row.overtime_hours = parseFloat(row.overtime_hours || 0);
-  row.hours_amount = row.use_hours ? (hourly * row.source_hours) : 0;
-  row.qty_amount = row.use_qty ? (row.source_qty * row.piece_rate) : 0;
 
-  if (mode === "Attendance Based") {
-    row.base_pay = bs_calculate_base_pay(row, frm);
-    row.ot_type = "hours";
-    const overtime_source = bs_get_active_overtime_source(frm);
-    if (overtime_source === "Employee Checkin Difference") {
-      row.ot_input = row.overtime_hours || row.ot_input || 0;
-    } else if (overtime_source === "Custom DocType") {
-      row.ot_input = row.source_hours || row.ot_input || 0;
+  if (bs_is_piece_mode(mode)) {
+    if (piece_basis === "Total Qty") {
+      row.hours_amount = 0;
+      row.qty_amount = row.source_qty * row.piece_rate;
+    } else {
+      row.qty_amount = 0;
+      row.hours_amount = hourly * row.source_hours;
     }
-  } else if (mode === "Checkin Based") {
     row.base_pay = bs_calculate_base_pay(row, frm);
-    row.ot_type = "hours";
-    const overtime_source = bs_get_active_overtime_source(frm);
-    if (overtime_source === "Employee Checkin Difference") {
-      row.ot_input = row.overtime_hours || row.ot_input || 0;
-    }
-  } else if (bs_is_piece_mode(mode)) {
-    row.base_pay = bs_calculate_base_pay(row, frm);
-    row.ot_input = row.overtime_with_salary ? row.source_hours : 0;
-    row.ot_amount = row.overtime_with_salary ? row.hours_amount : 0;
   } else {
+    row.hours_amount = 0;
+    row.qty_amount = 0;
     row.base_pay = bs_calculate_base_pay(row, frm);
   }
 
-  if (!bs_is_piece_mode(mode)) {
-    row.ot_type = "hours";
-    row.ot_amount = hourly * row.ot_input;
-  }
+  row.ot_type = "hours";
+  row.ot_amount = hourly * row.ot_input;
 
   const structure_doc = bs_get_cached_structure_doc(row.salary_structure || "");
   (row.components || []).forEach((item) => {
     if (!item.auto_calculated) return;
     if (item.role === "base") item.amount = row.base_pay || 0;
-    if (item.role === "overtime") {
-      item.amount = bs_is_piece_mode(mode)
-        ? bs_get_piece_overtime_amount(row, structure_doc)
-        : (row.ot_amount || 0);
-    }
+    if (item.role === "overtime") item.amount = row.ot_amount || 0;
     if (item.role === "qty") item.amount = bs_get_piece_qty_component_amount(row, structure_doc);
   });
   const component_totals_after = bs_get_component_totals(row);
-  row.total_additions = row.ot_amount + component_totals_after.earnings + ((bs_is_piece_mode(mode) && row.overtime_with_salary) ? (row.qty_amount || 0) : 0);
+  row.total_additions = row.ot_amount + component_totals_after.earnings;
   row.total_deductions = (row.adv_deduct || 0) + component_totals_after.deductions;
   row.gross = row.base_pay + row.total_additions;
   row.net = Math.max(0, row.gross - row.total_deductions);
@@ -2572,6 +2896,154 @@ async function bs_maybe_auto_load_source(force = false) {
   await bs_load_source_data({ silent: true });
 }
 
+async function bs_prepare_source_load(frm) {
+  bs_sync_period_from_header(frm);
+  await bs_sync_source_doc(frm);
+  const start_date = frm.doc.start_date || "";
+  const end_date = frm.doc.end_date || "";
+  const employees = (window._bs.rows || []).map((row) => row.employee).filter(Boolean);
+  return { start_date, end_date, employees };
+}
+
+async function bs_load_days_data(options = {}) {
+  const silent = !!options.silent;
+  const frm = window._bs.frm;
+  if (!frm || !window._bs.rows.length || !bs_needs_days_load(frm)) return false;
+  const { start_date, end_date, employees } = await bs_prepare_source_load(frm);
+  if (!start_date || !end_date || !employees.length) return false;
+
+  const source = bs_get_days_attendance_source(frm);
+  const att = await bs_call("payroll_bulk.api.get_bulk_attendance_values", {
+    employees,
+    source,
+    start_date,
+    end_date,
+  });
+  const source_rows = att.message || {};
+  window._bs.rows.forEach((row) => {
+    const item = source_rows[row.employee] || {};
+    row.attendance_days = parseFloat(item.attendance_days || 0);
+    row.absent_days = parseFloat(item.absent_days || 0);
+    row.attendance_hours = parseFloat(item.attendance_hours || 0);
+    row.payment_days = parseFloat(item.payment_days || 0);
+    recalc_row(row);
+  });
+  window._bs.loaded_days_period = bs_period_key(start_date, end_date);
+  if (!silent) frappe.show_alert({ message: "Days loaded for selected period.", indicator: "green" }, 3);
+  return true;
+}
+
+async function bs_load_overtime_data(options = {}) {
+  const silent = !!options.silent;
+  const frm = window._bs.frm;
+  if (!frm || !window._bs.rows.length) return false;
+  const overtime_source = bs_get_active_overtime_source(frm);
+  if (overtime_source === "Manual") {
+    bs_apply_overtime_source_to_rows(frm);
+    return false;
+  }
+  if (!bs_needs_overtime_load(frm)) return false;
+  const { start_date, end_date, employees } = await bs_prepare_source_load(frm);
+  if (!start_date || !end_date || !employees.length) return false;
+
+  if (overtime_source === "Employee Checkin Difference") {
+    const overtime = await bs_call("payroll_bulk.api.get_bulk_checkin_overtime_values", {
+      employees,
+      start_date,
+      end_date,
+      ot_method: "out_in",
+    });
+    const checkin_overtime_rows = overtime.message || {};
+    window._bs.rows.forEach((row) => {
+      const item = checkin_overtime_rows[row.employee] || {};
+      row.worked_hours = parseFloat(item.worked_hours || 0);
+      row.shift_hours = parseFloat(item.shift_hours || 0);
+      row.overtime_hours = parseFloat(item.overtime_hours || 0);
+      row.ot_input = row.overtime_hours;
+      recalc_row(row);
+    });
+  } else if (overtime_source === "Custom DocType") {
+    if (!frm.doc.overtime_doctype || !frm.doc.overtime_employee_field || !frm.doc.overtime_date_field) {
+      if (!silent) frappe.show_alert({ message: "Set Custom DocType mapping for Overtime.", indicator: "red" }, 4);
+      return false;
+    }
+    const res = await bs_call("payroll_bulk.api.get_bulk_source_values", {
+      employees,
+      source_doctype: frm.doc.overtime_doctype,
+      employee_field: frm.doc.overtime_employee_field,
+      date_field: frm.doc.overtime_date_field,
+      hours_field: frm.doc.overtime_hours_field || "",
+      qty_field: "",
+      rate_field: "",
+      start_date,
+      end_date,
+      batch_name: frm.doc.name || "",
+    });
+    const imported_rows = res.message || {};
+    window._bs.rows.forEach((row) => {
+      const item = imported_rows[row.employee] || {};
+      row.ot_input = parseFloat(item.hours || 0);
+      row.overtime_hours = row.ot_input;
+      recalc_row(row);
+    });
+  }
+  window._bs.loaded_overtime_period = bs_period_key(start_date, end_date);
+  if (!silent) frappe.show_alert({ message: "Overtime loaded for selected period.", indicator: "green" }, 3);
+  return true;
+}
+
+async function bs_load_piece_salary_data(options = {}) {
+  const silent = !!options.silent;
+  const frm = window._bs.frm;
+  if (!frm || !window._bs.rows.length || !bs_needs_piece_salary_load(frm)) return false;
+  const { start_date, end_date, employees } = await bs_prepare_source_load(frm);
+  if (!start_date || !end_date || !employees.length) return false;
+  if (!frm.doc.overtime_doctype || !frm.doc.overtime_employee_field || !frm.doc.overtime_date_field) {
+    if (!silent) frappe.show_alert({ message: "Set Source DocType mapping for Per Piece salary.", indicator: "red" }, 4);
+    return false;
+  }
+
+  const piece_basis = frm.doc.per_piece_basis || "Total Hours";
+  const res = await bs_call("payroll_bulk.api.get_bulk_source_values", {
+    employees,
+    source_doctype: frm.doc.overtime_doctype,
+    employee_field: frm.doc.overtime_employee_field,
+    date_field: frm.doc.overtime_date_field,
+    hours_field: piece_basis === "Total Hours" ? (frm.doc.overtime_hours_field || "") : "",
+    qty_field: piece_basis === "Total Qty" ? (frm.doc.overtime_qty_field || "") : "",
+    rate_field: piece_basis === "Total Qty" ? (frm.doc.overtime_rate_field || "") : "",
+    start_date,
+    end_date,
+    batch_name: frm.doc.name || "",
+  });
+  const imported_rows = res.message || {};
+  window._bs.rows.forEach((row) => {
+    const item = imported_rows[row.employee] || {};
+    row.source_row_names = item.row_names || [];
+    if (piece_basis === "Total Qty") {
+      row.source_qty = parseFloat(item.qty || 0);
+      row.piece_rate = parseFloat(item.rate || 0);
+      row.source_hours = 0;
+    } else {
+      row.source_hours = parseFloat(item.hours || 0);
+      row.source_qty = 0;
+      row.piece_rate = 0;
+    }
+    recalc_row(row);
+  });
+  const linked_source_rows = window._bs.rows.flatMap((row) => row.source_row_names || []);
+  if (linked_source_rows.length) {
+    await bs_call("payroll_bulk.api.mark_bulk_source_rows", {
+      source_doctype: frm.doc.overtime_doctype,
+      row_names: linked_source_rows,
+      batch_name: frm.doc.name || "",
+    });
+  }
+  window._bs.loaded_piece_period = bs_period_key(start_date, end_date);
+  if (!silent) frappe.show_alert({ message: "Piece salary loaded for selected period.", indicator: "green" }, 3);
+  return true;
+}
+
 async function bs_load_source_data(options = {}) {
   const silent = !!options.silent;
   const frm = window._bs.frm;
@@ -2579,118 +3051,16 @@ async function bs_load_source_data(options = {}) {
     frappe.show_alert({ message: "Add employees before loading source data.", indicator: "orange" }, 4);
     return;
   }
-
-  await bs_sync_source_doc(frm);
-  const mode = frm.doc.calculation_mode || "Manual";
-  const overtime_source = bs_get_active_overtime_source(frm);
-  frm.doc.overtime_source = overtime_source;
-  const attendance_source = mode === "Checkin Based" ? "Employee Checkin" : "Attendance";
-  const needs_attendance = ["Attendance Based", "Checkin Based"].includes(mode)
-    || (mode === "Manual" && ["By Payment Days", "Deduct Absent Days"].includes(frm.doc.manual_salary_basis || "Full Month"));
-  const needs_checkin_overtime = (mode === "Checkin Based" || mode === "Attendance Based")
-    && overtime_source === "Employee Checkin Difference";
-  const needs_custom_source = bs_is_piece_mode(mode) && overtime_source === "Custom DocType"
-    || (["Attendance Based", "Checkin Based"].includes(mode) && overtime_source === "Custom DocType");
-  if (!needs_attendance && !needs_custom_source && !needs_checkin_overtime) {
-    if (!silent) frappe.show_alert({ message: "Selected source does not need import.", indicator: "orange" }, 4);
-    return;
-  }
-
-  if (needs_custom_source) {
-    const required = [
-      ["overtime_doctype", "Custom DocType"],
-      ["overtime_employee_field", "Employee Field"],
-      ["overtime_date_field", "Date Field"],
-    ];
-    if (bs_is_piece_mode(mode) && !frm.doc.overtime_hours_field && !frm.doc.overtime_qty_field) {
-      frappe.show_alert({ message: "Set Total Hours Field or Total Qty Field.", indicator: "red" }, 4);
-      return;
-    }
-    for (const [fieldname, label] of required) {
-      if (!frm.doc[fieldname]) {
-        frappe.show_alert({ message: `${label} is required.`, indicator: "red" }, 4);
-        return;
-      }
-    }
-  }
-
   const btn = document.getElementById("bs-load-source-btn");
   if (btn) { btn.disabled = true; btn.textContent = "⏳ Loading..."; }
   try {
-    let source_rows = {};
-    if (needs_attendance) {
-      const att = await bs_call("payroll_bulk.api.get_bulk_attendance_values", {
-        employees: window._bs.rows.map((row) => row.employee),
-        source: attendance_source,
-        start_date: frm.doc.start_date || "",
-        end_date: frm.doc.end_date || "",
-      });
-      source_rows = att.message || {};
-    }
-    let imported_rows = {};
-    if (needs_custom_source) {
-      const res = await bs_call("payroll_bulk.api.get_bulk_source_values", {
-        employees: window._bs.rows.map((row) => row.employee),
-        source_doctype: frm.doc.overtime_doctype,
-        employee_field: frm.doc.overtime_employee_field,
-        date_field: frm.doc.overtime_date_field,
-        hours_field: frm.doc.overtime_hours_field || "",
-        qty_field: frm.doc.overtime_qty_field || "",
-        rate_field: frm.doc.overtime_rate_field || "",
-        start_date: frm.doc.start_date || "",
-        end_date: frm.doc.end_date || "",
-        batch_name: frm.doc.name || "",
-      });
-      imported_rows = res.message || {};
-    }
-    let checkin_overtime_rows = {};
-    if (needs_checkin_overtime) {
-      const overtime = await bs_call("payroll_bulk.api.get_bulk_checkin_overtime_values", {
-        employees: window._bs.rows.map((row) => row.employee),
-        start_date: frm.doc.start_date || "",
-        end_date: frm.doc.end_date || "",
-        ot_method: "out_in",
-      });
-      checkin_overtime_rows = overtime.message || {};
-    }
-
-    window._bs.rows.forEach((row) => {
-      const attendance_item = source_rows[row.employee] || {};
-      if (needs_attendance) {
-        row.attendance_days = parseFloat(attendance_item.attendance_days || 0);
-        row.absent_days = parseFloat(attendance_item.absent_days || 0);
-        row.attendance_hours = parseFloat(attendance_item.attendance_hours || 0);
-        row.payment_days = parseFloat(attendance_item.payment_days || 0);
-      }
-
-      const item = imported_rows[row.employee] || {};
-      if (needs_custom_source) {
-        row.source_hours = parseFloat(item.hours || 0);
-        row.source_qty = parseFloat(item.qty || 0);
-        row.piece_rate = parseFloat(item.rate || 0);
-        row.source_row_names = item.row_names || [];
-        if (overtime_source === "Custom DocType") row.ot_input = parseFloat(item.hours || row.ot_input || 0);
-      }
-      if (needs_checkin_overtime) {
-        const overtime_item = checkin_overtime_rows[row.employee] || {};
-        row.worked_hours = parseFloat(overtime_item.worked_hours || 0);
-        row.shift_hours = parseFloat(overtime_item.shift_hours || 0);
-        row.overtime_hours = parseFloat(overtime_item.overtime_hours || 0);
-        row.ot_input = row.overtime_hours;
-      }
-      recalc_row(row);
-    });
-    const linked_source_rows = window._bs.rows.flatMap((row) => row.source_row_names || []);
-    if (needs_custom_source && linked_source_rows.length) {
-      await bs_call("payroll_bulk.api.mark_bulk_source_rows", {
-        source_doctype: frm.doc.overtime_doctype,
-        row_names: linked_source_rows,
-        batch_name: frm.doc.name || "",
-      });
-    }
-    if (bs_auto_hide_filters_enabled()) bs_hide_filters();
+    await bs_load_days_data({ silent: true });
+    await bs_load_piece_salary_data({ silent: true });
+    await bs_load_overtime_data({ silent: true });
+    const { start_date, end_date } = await bs_prepare_source_load(frm);
+    window._bs.loaded_source_period = bs_period_key(start_date, end_date);
     bs_render_table();
-    if (!silent) frappe.show_alert({ message: "Source data loaded.", indicator: "green" }, 3);
+    if (!silent) frappe.show_alert({ message: "Days, salary, and overtime loaded.", indicator: "green" }, 3);
   } catch (error) {
     if (!silent) frappe.msgprint({ title: "Source Load Error", message: error.message || String(error), indicator: "red" });
   } finally {

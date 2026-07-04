@@ -15,6 +15,9 @@ class BulkSalaryCreation(Document):
 	def before_save(self):
 		self._remove_blank_employee_rows()
 		self._remove_blank_component_rows()
+		from payroll_bulk.source_recalc import recalculate_bulk_salary_source
+
+		recalculate_bulk_salary_source(self)
 
 	def _remove_blank_employee_rows(self):
 		valid_rows = [row for row in (self.get("employees") or []) if row.get("employee")]

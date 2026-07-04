@@ -15,26 +15,31 @@
   "enable_manual_add",
   "auto_hide_filters",
   "default_submit_slips",
-  "column_break_tsdi",
-  "default_overtime_with_salary",
-  "default_use_qty",
-  "default_use_hours",
-  "section_break_components",
-  "auto_load_structure_components",
-  "component_rules",
-  "section_break_source_defaults",
+  "section_break_calc_defaults",
   "default_calculation_mode",
+  "default_manual_salary_basis",
+  "default_overtime_source",
+  "default_per_piece_basis",
+  "column_break_calc",
+  "default_overtime_with_salary",
+  "section_break_source_defaults",
   "overtime_doctype",
   "overtime_employee_field",
   "overtime_date_field",
-  "column_break_acvx",
-  "overtime_qty_field",
-  "qty_component",
-  "overtime_rate_field",
-  "column_break_padl",
+  "column_break_source_a",
   "overtime_hours_field",
+  "overtime_qty_field",
+  "overtime_rate_field",
+  "column_break_source_b",
+  "default_use_hours",
+  "default_use_qty",
+  "section_break_components",
+  "enable_component_configuration",
+  "auto_load_structure_components",
+  "component_rules",
+  "column_break_components",
   "hours_component",
-  "default_per_piece_basis"
+  "qty_component"
  ],
  "fields": [
   {
@@ -92,7 +97,7 @@
    "default": "1",
    "fieldname": "auto_hide_filters",
    "fieldtype": "Check",
-   "label": "Auto Hide Filters"
+   "label": "Auto Hide Field Mapping Panel"
   },
   {
    "default": "1",
@@ -101,9 +106,9 @@
    "label": "Default Submit Slips"
   },
   {
-   "fieldname": "section_break_source_defaults",
+   "fieldname": "section_break_calc_defaults",
    "fieldtype": "Section Break",
-   "label": "Default Source Mapping"
+   "label": "Calculation Defaults"
   },
   {
    "default": "Manual",
@@ -113,16 +118,47 @@
    "options": "Manual\nAttendance Based\nCheckin Based\nPer Piece or Per Hour"
   },
   {
+   "default": "Full Month",
+   "depends_on": "eval:doc.default_calculation_mode=='Manual'",
+   "fieldname": "default_manual_salary_basis",
+   "fieldtype": "Select",
+   "label": "Default Manual Salary Basis",
+   "options": "Full Month\nBy Payment Days\nDeduct Absent Days"
+  },
+  {
+   "default": "Manual",
+   "fieldname": "default_overtime_source",
+   "fieldtype": "Select",
+   "label": "Default Overtime Source",
+   "options": "Manual\nEmployee Checkin Difference\nCustom DocType"
+  },
+  {
    "default": "Total Hours",
+   "depends_on": "eval:doc.default_calculation_mode=='Per Piece or Per Hour'",
    "fieldname": "default_per_piece_basis",
    "fieldtype": "Select",
    "label": "Default Per Piece Basis",
    "options": "Total Hours\nTotal Qty"
   },
   {
+   "fieldname": "column_break_calc",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "default_overtime_with_salary",
+   "fieldtype": "Check",
+   "label": "Default Overtime with Salary"
+  },
+  {
+   "fieldname": "section_break_source_defaults",
+   "fieldtype": "Section Break",
+   "label": "Default Source Mapping"
+  },
+  {
    "fieldname": "overtime_doctype",
    "fieldtype": "Link",
-   "label": "Custom Source DocType",
+   "label": "Source DocType",
    "options": "DocType"
   },
   {
@@ -136,54 +172,54 @@
    "label": "Date Field"
   },
   {
+   "fieldname": "column_break_source_a",
+   "fieldtype": "Column Break"
+  },
+  {
    "fieldname": "overtime_hours_field",
    "fieldtype": "Select",
-   "label": "Total Hours Field"
+   "label": "Hours Field"
   },
   {
    "fieldname": "overtime_qty_field",
    "fieldtype": "Select",
-   "label": "Total Qty Field"
+   "label": "Qty Field"
   },
   {
    "fieldname": "overtime_rate_field",
    "fieldtype": "Select",
-   "label": "Rate per Piece Field"
+   "label": "Rate Field"
+  },
+  {
+   "fieldname": "column_break_source_b",
+   "fieldtype": "Column Break"
   },
   {
    "default": "1",
    "fieldname": "default_use_hours",
    "fieldtype": "Check",
-   "label": "Default Use Hours"
+   "hidden": 1,
+   "label": "Default Use Hours",
+   "read_only": 1
   },
   {
    "default": "1",
    "fieldname": "default_use_qty",
    "fieldtype": "Check",
-   "label": "Default Use Qty"
-  },
-  {
-   "default": "0",
-   "fieldname": "default_overtime_with_salary",
-   "fieldtype": "Check",
-   "label": "Default Overtime with Salary"
-  },
-  {
-   "fieldname": "hours_component",
-   "fieldtype": "Link",
-   "label": "Hours Component",
-   "options": "Salary Component"
-  },
-  {
-   "fieldname": "qty_component",
-   "fieldtype": "Link",
-   "label": "Qty Component",
-   "options": "Salary Component"
+   "hidden": 1,
+   "label": "Default Use Qty",
+   "read_only": 1
   },
   {
    "fieldname": "section_break_components",
    "fieldtype": "Section Break",
    "label": "Component Configuration"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_component_configuration",
+   "fieldtype": "Check",
+   "label": "Enable Component Configuration Panel"
   },
   {
    "default": "1",
@@ -198,22 +234,26 @@
    "options": "Payroll Bulk Component Setting"
   },
   {
-   "fieldname": "column_break_acvx",
+   "fieldname": "column_break_components",
    "fieldtype": "Column Break"
   },
   {
-   "fieldname": "column_break_padl",
-   "fieldtype": "Column Break"
+   "fieldname": "hours_component",
+   "fieldtype": "Link",
+   "label": "Hours Component",
+   "options": "Salary Component"
   },
   {
-   "fieldname": "column_break_tsdi",
-   "fieldtype": "Column Break"
+   "fieldname": "qty_component",
+   "fieldtype": "Link",
+   "label": "Qty Component",
+   "options": "Salary Component"
   }
  ],
  "issingle": 1,
  "links": [],
- "modified": "2026-07-03 16:15:30.215455",
- "modified_by": "techcraft986@gmail.com",
+ "modified": "2026-07-05 03:56:00.000000",
+ "modified_by": "Administrator",
  "module": "Payroll Bulk",
  "name": "Payroll Bulk Settings",
  "owner": "Administrator",

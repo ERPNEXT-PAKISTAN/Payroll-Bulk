@@ -37,6 +37,13 @@ window.BS_BACKGROUND_ROW_THRESHOLD = BS_BACKGROUND_ROW_THRESHOLD;
 
 frappe.ui.form.on("Bulk Salary Creation", {
   before_save(frm) {
+    if (typeof bs_sync_period_from_header === "function") {
+      bs_sync_period_from_header(frm);
+    }
+    if (typeof bs_sync_source_doc === "function" && window._bs?.frm === frm && window._bs?.source_ctrls) {
+      const values = bs_collect_source_values(frm);
+      Object.assign(frm.doc, values);
+    }
     if (typeof bs_sync_to_frm === "function" && window._bs?.frm === frm && (window._bs?.rows || []).length) {
       bs_sync_to_frm(frm);
     }
@@ -58,11 +65,21 @@ frappe.ui.form.on("Bulk Salary Creation", {
       const was_same_batch = window._bs?.frm?.doc?.name === frm.doc.name && (window._bs?.rows || []).length;
       if (was_same_batch && frm.doc.docstatus === 0 && !bs_is_completed_batch(frm.doc)) {
         window._bs.frm = frm;
+        bs_sync_period_from_header(frm);
         bs_merge_saved_rows_from_frm(frm);
-        if (typeof bs_sync_to_frm === "function") bs_sync_to_frm(frm);
-        bs_render_table();
-        bs_trigger_source_reload().catch((e) => console.warn("Source reload:", e));
-        if (typeof bs_tidy_form_after_ui === "function") bs_tidy_form_after_ui(frm);
+        if (typeof bs_restore_source_controls_from_doc === "function") {
+          bs_restore_source_controls_from_doc(frm).then(async () => {
+            const saved_ot = bs_get_active_overtime_source(frm);
+            if (saved_ot === "Manual") {
+              bs_apply_overtime_source_to_rows(frm);
+            }
+            await bs_trigger_source_reload({ force: true });
+            if (typeof bs_tidy_form_after_ui === "function") bs_tidy_form_after_ui(frm);
+          });
+        } else {
+          bs_render_table();
+          if (typeof bs_tidy_form_after_ui === "function") bs_tidy_form_after_ui(frm);
+        }
         return;
       }
       if (frm.doc.docstatus === 1 || bs_is_completed_batch(frm.doc)) {

@@ -87,12 +87,200 @@ def _validate_employee_holiday_list(employee: str, start_date: str, end_date: st
 		)
 
 
+def _apply_date_filters(filters: dict, fieldname: str, start_date: str | None, end_date: str | None):
+	if not fieldname:
+		return
+	if start_date and end_date:
+		filters[fieldname] = ["between", [start_date, end_date]]
+	elif start_date:
+		filters[fieldname] = [">=", start_date]
+	elif end_date:
+		filters[fieldname] = ["<=", end_date]
+
+
+def _get_parent_doctypes_for_child(child_doctype: str) -> list[str]:
+	return frappe.get_all(
+		"DocField",
+		filters={"fieldtype": "Table", "options": child_doctype, "parent": ["!=", "DocType"]},
+		pluck="parent",
+		distinct=True,
+	)
+
+
 def _validate_field(meta, fieldname: str) -> str:
 	if not fieldname:
 		return ""
-	if not meta.get_field(fieldname):
-		frappe.throw(f"Field {fieldname} does not exist in {meta.name}.")
+	if fieldname.startswith("@parent."):
+		parent_field = fieldname.split(".", 1)[1]
+		for parent in _get_parent_doctypes_for_child(meta.name):
+			if frappe.get_meta(parent).get_field(parent_field):
+				return fieldname
+		frappe.throw(f"Field {fieldname} does not exist for {meta.name}.")
+	if "." in fieldname:
+		table_field, child_field = fieldname.split(".", 1)
+		table_df = meta.get_field(table_field)
+		if not table_df or table_df.fieldtype != "Table":
+			frappe.throw(f"Field {fieldname} does not exist in {meta.name}.")
+		child_meta = frappe.get_meta(table_df.options)
+		if not child_meta.get_field(child_field):
+			frappe.throw(f"Field {fieldname} does not exist in {meta.name}.")
+		return fieldname
+	if meta.get_field(fieldname):
+		return fieldname
+	if meta.istable:
+		for parent in _get_parent_doctypes_for_child(meta.name):
+			if frappe.get_meta(parent).get_field(fieldname):
+				return fieldname
+	frappe.throw(f"Field {fieldname} does not exist in {meta.name}.")
 	return fieldname
+
+
+def _resolve_source_field(meta, fieldname: str):
+	if not fieldname:
+		return meta, "", None, None
+	if "." not in fieldname:
+		return meta, fieldname, None, None
+	table_field, child_field = fieldname.split(".", 1)
+	table_df = meta.get_field(table_field)
+	if not table_df or table_df.fieldtype != "Table":
+		frappe.throw(f"Field {fieldname} does not exist in {meta.name}.")
+	child_meta = frappe.get_meta(table_df.options)
+	if not child_meta.get_field(child_field):
+		frappe.throw(f"Field {fieldname} does not exist in {meta.name}.")
+	return child_meta, child_field, table_field, table_df.options
+
+
+def _is_numeric_source_field(fieldtype: str, fieldname: str) -> bool:
+	if fieldtype in {"Float", "Currency", "Int", "Percent", "Duration"}:
+		return True
+	name = (fieldname or "").lower()
+	return fieldtype == "Data" and any(token in name for token in ("rate", "piece", "amount", "price", "target", "qty", "hour"))
+
+
+def _source_field_options(meta, layout_fields):
+	options = []
+	for df in meta.fields:
+		if not df.fieldname:
+			continue
+		if df.fieldtype == "Table" and df.options:
+			child_meta = frappe.get_meta(df.options)
+			table_label = df.label or df.fieldname
+			for cf in child_meta.fields:
+				if not cf.fieldname or cf.fieldtype in layout_fields:
+					continue
+				options.append(
+					{
+						"fieldname": f"{df.fieldname}.{cf.fieldname}",
+						"label": f"{table_label} › {cf.label or cf.fieldname}",
+						"fieldtype": cf.fieldtype,
+						"options": cf.options,
+						"child_table": df.fieldname,
+						"child_doctype": df.options,
+					}
+				)
+			continue
+		if df.fieldtype in layout_fields:
+			continue
+		options.append(
+			{
+				"fieldname": df.fieldname,
+				"label": df.label or df.fieldname,
+				"fieldtype": df.fieldtype,
+				"options": df.options,
+			}
+		)
+	return options
+
+
+def _istable_date_target(meta, parenttype: str, date_field: str):
+	if date_field.startswith("@parent."):
+		parent_field = date_field.split(".", 1)[1]
+		if frappe.get_meta(parenttype).get_field(parent_field):
+			return "parent", parent_field, None
+		frappe.throw(f"Field {date_field} does not exist on parent {parenttype}.")
+	if meta.get_field(date_field):
+		return "child", None, date_field
+	if frappe.get_meta(parenttype).get_field(date_field):
+		return "parent", date_field, None
+	frappe.throw(f"Field {date_field} does not exist on {meta.name} or parent {parenttype}.")
+
+
+def _get_istable_source_values(
+	meta,
+	source_doctype: str,
+	employees: list[str],
+	employee_field: str,
+	date_field: str,
+	hours_field: str,
+	qty_field: str,
+	rate_field: str,
+	start_date: str | None,
+	end_date: str | None,
+):
+	parenttypes = _get_parent_doctypes_for_child(source_doctype)
+	if not parenttypes:
+		frappe.throw(_("No parent DocType found for child table {0}.").format(source_doctype))
+	parenttype = parenttypes[0]
+	parent_meta = frappe.get_meta(parenttype)
+	date_on, parent_date_field, child_date_field = _istable_date_target(meta, parenttype, date_field)
+
+	parent_filters = {}
+	if date_on == "parent":
+		_apply_date_filters(parent_filters, parent_date_field, start_date, end_date)
+	if parent_meta.is_submittable:
+		parent_filters["docstatus"] = 1
+
+	parent_names = None
+	if date_on == "parent" or parent_filters:
+		parent_names = frappe.get_all(
+			parenttype,
+			filters=parent_filters or None,
+			pluck="name",
+			limit_page_length=5000,
+		)
+
+	child_filters = {
+		"parenttype": parenttype,
+		employee_field: ["in", employees],
+	}
+	if parent_names is not None:
+		child_filters["parent"] = ["in", parent_names or [""]]
+	if date_on == "child":
+		_apply_date_filters(child_filters, child_date_field, start_date, end_date)
+
+	child_fields = ["name", "parent", employee_field]
+	for fieldname in [hours_field, qty_field, rate_field]:
+		if fieldname and fieldname not in child_fields:
+			child_fields.append(fieldname)
+
+	rows = frappe.get_all(
+		source_doctype,
+		filters=child_filters,
+		fields=list(dict.fromkeys(child_fields)),
+		limit_page_length=5000,
+	)
+	result = {employee: {"hours": 0.0, "qty": 0.0, "rate": 0.0, "row_names": []} for employee in employees}
+	for row in rows:
+		employee = row.get(employee_field)
+		if employee not in result:
+			continue
+		hours = float(row.get(hours_field) or 0) if hours_field else 0.0
+		qty = float(row.get(qty_field) or 0) if qty_field else 0.0
+		rate = float(row.get(rate_field) or 0) if rate_field else 0.0
+		item = result[employee]
+		item["hours"] += hours
+		item["qty"] += qty
+		if qty and rate:
+			total_amount = item.get("_amount", 0.0) + (qty * rate)
+			item["_amount"] = total_amount
+			item["rate"] = total_amount / item["qty"] if item["qty"] else 0.0
+		elif rate:
+			item["rate"] = rate
+		item["row_names"].append(row.get("name"))
+
+	for item in result.values():
+		item.pop("_amount", None)
+	return result
 
 
 # ---------------------------------------------------------------------------
@@ -119,16 +307,23 @@ def get_doctype_field_options(doctype_name: str):
 		"Table MultiSelect",
 	}
 
-	return [
-		{
-			"fieldname": df.fieldname,
-			"label": df.label or df.fieldname,
-			"fieldtype": df.fieldtype,
-			"options": df.options,
-		}
-		for df in meta.fields
-		if df.fieldname and df.fieldtype not in layout_fields
-	]
+	options = _source_field_options(meta, layout_fields)
+	if meta.istable:
+		for parent in _get_parent_doctypes_for_child(doctype_name):
+			parent_meta = frappe.get_meta(parent)
+			for df in parent_meta.fields:
+				if not df.fieldname or df.fieldtype in layout_fields:
+					continue
+				options.append(
+					{
+						"fieldname": f"@parent.{df.fieldname}",
+						"label": f"{parent} › {df.label or df.fieldname}",
+						"fieldtype": df.fieldtype,
+						"options": df.options,
+						"parent_doctype": parent,
+					}
+				)
+	return options
 
 
 def _is_excluded_structure_component(component_name: str | None, component_type: str | None) -> bool:
@@ -277,52 +472,156 @@ def get_bulk_source_values(
 	qty_field = _validate_field(meta, qty_field or "")
 	rate_field = _validate_field(meta, rate_field or "")
 
-	fields = ["name", employee_field]
-	if hours_field:
-		fields.append(hours_field)
-	if qty_field:
-		fields.append(qty_field)
-	if rate_field:
-		fields.append(rate_field)
+	if meta.istable:
+		return _get_istable_source_values(
+			meta,
+			source_doctype,
+			employees,
+			employee_field,
+			date_field,
+			hours_field,
+			qty_field,
+			rate_field,
+			start_date,
+			end_date,
+		)
+
+	_, employee_child_field, employee_table_field, employee_child_doctype = _resolve_source_field(meta, employee_field)
+	_, hours_child_field, hours_table_field, _ = _resolve_source_field(meta, hours_field)
+	_, qty_child_field, qty_table_field, _ = _resolve_source_field(meta, qty_field)
+	_, rate_child_field, rate_table_field, _ = _resolve_source_field(meta, rate_field)
+
+	child_table_field = next(
+		(table for table in [employee_table_field, hours_table_field, qty_table_field, rate_table_field] if table),
+		None,
+	)
+	child_doctype = employee_child_doctype if child_table_field else None
+	if child_table_field:
+		for table in [hours_table_field, qty_table_field, rate_table_field]:
+			if table and table != child_table_field:
+				frappe.throw(_("Mapped fields must use the same child table ({0}).").format(child_table_field))
+
+	result = {employee: {"hours": 0.0, "qty": 0.0, "rate": 0.0, "row_names": []} for employee in employees}
 	has_bulk_payroll_field = bool(meta.get_field("bulk_payroll"))
 	has_salary_slip_field = bool(meta.get_field("salary_slip"))
-	if has_bulk_payroll_field:
-		fields.append("bulk_payroll")
-	if has_salary_slip_field:
-		fields.append("salary_slip")
 
-	filters = [[employee_field, "in", employees]]
-	if start_date:
-		filters.append([date_field, ">=", start_date])
-	if end_date:
-		filters.append([date_field, "<=", end_date])
-	if meta.is_submittable:
-		filters.append(["docstatus", "=", 1])
+	if child_table_field:
+		parent_fields = ["name"]
+		if has_bulk_payroll_field:
+			parent_fields.append("bulk_payroll")
+		if has_salary_slip_field:
+			parent_fields.append("salary_slip")
+		_, date_child_field, date_table_field, _ = _resolve_source_field(meta, date_field)
+		if date_table_field and date_table_field != child_table_field:
+			frappe.throw(_("Date field must be on the same child table or parent document."))
+		if date_table_field:
+			date_filter_field = date_child_field
+			date_filter_on = "child"
+		else:
+			parent_fields.append(date_field)
+			date_filter_field = date_field
+			date_filter_on = "parent"
 
-	rows = frappe.get_all(source_doctype, filters=filters, fields=fields, limit_page_length=5000)
-	result = {employee: {"hours": 0.0, "qty": 0.0, "rate": 0.0, "row_names": []} for employee in employees}
+		parent_filters = {}
+		if date_filter_on == "parent":
+			_apply_date_filters(parent_filters, date_filter_field, start_date, end_date)
+		if meta.is_submittable:
+			parent_filters["docstatus"] = 1
 
-	for row in rows:
-		if has_salary_slip_field and row.get("salary_slip"):
-			continue
-		if has_bulk_payroll_field and row.get("bulk_payroll") and row.get("bulk_payroll") != batch_name:
-			continue
-		employee = row.get(employee_field)
-		if employee not in result:
-			continue
-		hours = float(row.get(hours_field) or 0) if hours_field else 0.0
-		qty = float(row.get(qty_field) or 0) if qty_field else 0.0
-		rate = float(row.get(rate_field) or 0) if rate_field else 0.0
-		item = result[employee]
-		item["hours"] += hours
-		item["qty"] += qty
-		if qty and rate:
-			total_amount = item.get("_amount", 0.0) + (qty * rate)
-			item["_amount"] = total_amount
-			item["rate"] = total_amount / item["qty"] if item["qty"] else 0.0
-		elif rate:
-			item["rate"] = rate
-		item["row_names"].append(row.get("name"))
+		parent_rows = frappe.get_all(
+			source_doctype,
+			filters=parent_filters,
+			fields=list(dict.fromkeys(parent_fields)),
+			limit_page_length=5000,
+		)
+
+		child_fields = ["name", "parent", employee_child_field]
+		for child_field in [hours_child_field, qty_child_field, rate_child_field, date_child_field if date_filter_on == "child" else ""]:
+			if child_field and child_field not in child_fields:
+				child_fields.append(child_field)
+
+		for parent in parent_rows:
+			if has_salary_slip_field and parent.get("salary_slip"):
+				continue
+			if has_bulk_payroll_field and parent.get("bulk_payroll") and parent.get("bulk_payroll") != batch_name:
+				continue
+
+			child_filters = {
+				"parent": parent.name,
+				"parenttype": source_doctype,
+				"parentfield": child_table_field,
+				employee_child_field: ["in", employees],
+			}
+			if date_filter_on == "child":
+				_apply_date_filters(child_filters, date_filter_field, start_date, end_date)
+
+			child_rows = frappe.get_all(
+				child_doctype,
+				filters=child_filters,
+				fields=child_fields,
+				limit_page_length=5000,
+			)
+			for row in child_rows:
+				employee = row.get(employee_child_field)
+				if employee not in result:
+					continue
+				hours = float(row.get(hours_child_field) or 0) if hours_child_field else 0.0
+				qty = float(row.get(qty_child_field) or 0) if qty_child_field else 0.0
+				rate = float(row.get(rate_child_field) or 0) if rate_child_field else 0.0
+				item = result[employee]
+				item["hours"] += hours
+				item["qty"] += qty
+				if qty and rate:
+					total_amount = item.get("_amount", 0.0) + (qty * rate)
+					item["_amount"] = total_amount
+					item["rate"] = total_amount / item["qty"] if item["qty"] else 0.0
+				elif rate:
+					item["rate"] = rate
+				item["row_names"].append(parent.name)
+	else:
+		fields = ["name", employee_field]
+		if hours_field:
+			fields.append(hours_field)
+		if qty_field:
+			fields.append(qty_field)
+		if rate_field:
+			fields.append(rate_field)
+		if has_bulk_payroll_field:
+			fields.append("bulk_payroll")
+		if has_salary_slip_field:
+			fields.append("salary_slip")
+
+		filters = [[employee_field, "in", employees]]
+		if start_date:
+			filters.append([date_field, ">=", start_date])
+		if end_date:
+			filters.append([date_field, "<=", end_date])
+		if meta.is_submittable:
+			filters.append(["docstatus", "=", 1])
+
+		rows = frappe.get_all(source_doctype, filters=filters, fields=fields, limit_page_length=5000)
+
+		for row in rows:
+			if has_salary_slip_field and row.get("salary_slip"):
+				continue
+			if has_bulk_payroll_field and row.get("bulk_payroll") and row.get("bulk_payroll") != batch_name:
+				continue
+			employee = row.get(employee_field)
+			if employee not in result:
+				continue
+			hours = float(row.get(hours_field) or 0) if hours_field else 0.0
+			qty = float(row.get(qty_field) or 0) if qty_field else 0.0
+			rate = float(row.get(rate_field) or 0) if rate_field else 0.0
+			item = result[employee]
+			item["hours"] += hours
+			item["qty"] += qty
+			if qty and rate:
+				total_amount = item.get("_amount", 0.0) + (qty * rate)
+				item["_amount"] = total_amount
+				item["rate"] = total_amount / item["qty"] if item["qty"] else 0.0
+			elif rate:
+				item["rate"] = rate
+			item["row_names"].append(row.get("name"))
 
 	for item in result.values():
 		item.pop("_amount", None)
@@ -408,42 +707,9 @@ def get_bulk_attendance_values(
 		return result
 
 	if source == "Employee Checkin":
-		rows = frappe.get_all(
-			"Employee Checkin",
-			filters=[
-				["employee", "in", employees],
-				["time", ">=", f"{start_date} 00:00:00"],
-				["time", "<=", f"{end_date} 23:59:59"],
-			],
-			fields=["employee", "time", "shift_actual_start", "shift_actual_end"],
-			order_by="employee asc, time asc",
-			limit_page_length=10000,
-		)
-		per_day = {}
-		for row in rows:
-			employee = row.employee
-			day = getdate(row.time)
-			key = (employee, day)
-			bucket = per_day.setdefault(key, {"min_time": None, "max_time": None, "hours": 0.0})
-			time_value = get_datetime(row.time)
-			bucket["min_time"] = time_value if not bucket["min_time"] or time_value < bucket["min_time"] else bucket["min_time"]
-			bucket["max_time"] = time_value if not bucket["max_time"] or time_value > bucket["max_time"] else bucket["max_time"]
-			if row.shift_actual_start and row.shift_actual_end:
-				start = get_datetime(row.shift_actual_start)
-				end = get_datetime(row.shift_actual_end)
-				if end > start:
-					bucket["hours"] = max(bucket["hours"], (end - start).total_seconds() / 3600)
-		for (employee, _day), bucket in per_day.items():
-			item = result.get(employee)
-			if not item:
-				continue
-			item["attendance_days"] += 1
-			item["payment_days"] += 1
-			hours = bucket["hours"]
-			if not hours and bucket["min_time"] and bucket["max_time"] and bucket["max_time"] > bucket["min_time"]:
-				hours = (bucket["max_time"] - bucket["min_time"]).total_seconds() / 3600
-			item["attendance_hours"] += hours
-		return result
+		from payroll_bulk.checkin_utils import aggregate_checkin_attendance
+
+		return aggregate_checkin_attendance(employees, start_date, end_date)
 
 	return result
 
@@ -468,10 +734,23 @@ def get_bulk_checkin_overtime_values(
 			["time", ">=", f"{start_date} 00:00:00"],
 			["time", "<=", f"{end_date} 23:59:59"],
 		],
-		fields=["employee", "time", "shift_start", "shift_end", "shift_actual_start", "shift_actual_end"],
+		fields=["employee", "time", "log_type", "shift_start", "shift_end", "shift_actual_start", "shift_actual_end"],
 		order_by="employee asc, time asc",
 		limit_page_length=10000,
 	)
+
+	from payroll_bulk.checkin_utils import (
+		build_checkin_day_buckets,
+		bucket_worked_hours,
+		get_employee_holiday_day_map,
+		is_countable_checkin_day,
+	)
+
+	start = getdate(start_date)
+	end = getdate(end_date)
+	buckets = build_checkin_day_buckets(rows)
+	employee_rows = frappe.get_all("Employee", filters={"name": ["in", employees]}, fields=["name", "company"])
+	holiday_map = get_employee_holiday_day_map(employee_rows, start, end)
 
 	per_day = {}
 	for row in rows:
@@ -507,10 +786,19 @@ def get_bulk_checkin_overtime_values(
 			bucket["actual_end"] = actual_end if not bucket["actual_end"] or actual_end > bucket["actual_end"] else bucket["actual_end"]
 
 	result = {employee: {"days": 0.0, "worked_hours": 0.0, "shift_hours": 0.0, "overtime_hours": 0.0} for employee in employees}
-	for (employee, _day), bucket in per_day.items():
+	for (employee, day), bucket in per_day.items():
 		item = result.get(employee)
 		if not item:
 			continue
+
+		day_key = str(day)
+		if day_key in (holiday_map.get(employee) or {}):
+			continue
+
+		checkin_bucket = buckets.get((employee, day_key))
+		if not is_countable_checkin_day(checkin_bucket):
+			continue
+
 		item["days"] += 1
 
 		actual_start = bucket["actual_start"] or bucket["min_time"]
@@ -518,8 +806,8 @@ def get_bulk_checkin_overtime_values(
 		shift_start = bucket["shift_start"]
 		shift_end = bucket["shift_end"]
 
-		worked_hours = 0.0
-		if actual_start and actual_end and actual_end > actual_start:
+		worked_hours = bucket_worked_hours(checkin_bucket)
+		if not worked_hours and actual_start and actual_end and actual_end > actual_start:
 			worked_hours = (actual_end - actual_start).total_seconds() / 3600
 
 		shift_hours = 0.0
