@@ -1,8 +1,16 @@
+"""Salary Slip document hooks — keep Bulk Salary Creation rows in sync.
+
+When a linked Salary Slip is created, submitted, cancelled, or deleted, the
+corresponding batch employee row status and batch summary totals are updated.
+Additional Salary rows linked to the batch are cancelled when a slip is cancelled.
+"""
+
 from __future__ import annotations
 
 import frappe
 from frappe.model.document import Document
 
+# Batch row statuses that count as successfully processed
 TRACKED_SUCCESS = {"Slip Created", "Submitted", "Payment Created", "Completed"}
 TRACKED_PROCESSED = TRACKED_SUCCESS | {"Cancelled", "Failed"}
 
@@ -51,6 +59,7 @@ def _sync_salary_slip_links(doc: Document, event: str):
 
 
 def _update_batch_summary(batch_name: str):
+	"""Recompute batch header totals and processing_status from child rows."""
 	rows = frappe.get_all("Bulk Salary Creation Employee", filters={"parent": batch_name}, fields=["status", "salary_slip_status", "gross_pay", "net_pay", "total_additions", "total_deductions"], limit_page_length=1000)
 	total_employees = len(rows)
 	processed_count = sum(1 for row in rows if row.status in TRACKED_PROCESSED)

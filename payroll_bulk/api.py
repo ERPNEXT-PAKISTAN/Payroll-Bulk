@@ -1,3 +1,10 @@
+"""Payroll Bulk server API.
+
+Whitelisted RPC methods power the desk UI and background jobs. Internal helpers
+cover holiday lists, component rules, accrual/payment journal entries, and batch
+salary slip processing.
+"""
+
 from __future__ import annotations
 
 import erpnext
@@ -10,6 +17,11 @@ from erpnext.accounts.doctype.accounting_dimension.accounting_dimension import (
 )
 from hrms.payroll.doctype.payroll_entry.payroll_entry import PayrollEntry
 from hrms.utils.holiday_list import get_holiday_list_for_employee
+
+
+# ---------------------------------------------------------------------------
+# Holiday list helpers
+# ---------------------------------------------------------------------------
 
 
 def _resolve_default_holiday_list(company: str) -> str | None:
@@ -79,6 +91,11 @@ def _validate_field(meta, fieldname: str) -> str:
 	if not meta.get_field(fieldname):
 		frappe.throw(f"Field {fieldname} does not exist in {meta.name}.")
 	return fieldname
+
+
+# ---------------------------------------------------------------------------
+# Component rules & custom source data
+# ---------------------------------------------------------------------------
 
 
 @frappe.whitelist()
@@ -537,7 +554,13 @@ def get_employee_advance_balance(employee: str):
 	}
 
 
+# ---------------------------------------------------------------------------
+# Accrual accounting (batch-level Journal Entry)
+# ---------------------------------------------------------------------------
+
+
 class _BulkAccrualAdapter:
+	"""Minimal Payroll Entry adapter for bulk accrual journal entries."""
 	def __init__(self, batch, submitted_salary_slips, payroll_payable_account: str):
 		self.batch = batch
 		self.doctype = "Bulk Salary Creation"
@@ -743,6 +766,7 @@ def _get_common_payroll_payable_account(salary_slips):
 
 
 def _format_bulk_jv_remark(batch) -> str:
+	"""Standard JV remark, e.g. 'Salary F/O January-2026, Dated:31-1-2026'."""
 	posting_date = getdate(batch.posting_date or batch.end_date or batch.start_date)
 	period_start = getdate(batch.start_date or posting_date)
 	month_label = period_start.strftime("%B-%Y")
@@ -750,8 +774,14 @@ def _format_bulk_jv_remark(batch) -> str:
 	return f"Salary F/O {month_label}, Dated:{dated}"
 
 
+# ---------------------------------------------------------------------------
+# Payment accounting (Bank/Cash Journal Entry)
+# ---------------------------------------------------------------------------
+
+
 @frappe.whitelist()
 def get_salary_payable_account(slip_name: str, batch_name: str | None = None):
+	"""Resolve Payroll Payable account from batch row, SSA, or accrual JE."""
 	if not slip_name or not frappe.db.exists("Salary Slip", slip_name):
 		frappe.throw(_("Salary Slip {0} not found.").format(slip_name))
 
@@ -792,6 +822,7 @@ def get_salary_payable_account(slip_name: str, batch_name: str | None = None):
 
 @frappe.whitelist()
 def get_batch_completed_summary(batch_name: str):
+	"""Totals, salary component columns, and JV references for the completed view."""
 	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
 		frappe.throw(_("Bulk Salary Creation {0} not found.").format(batch_name))
 
@@ -866,6 +897,7 @@ def create_bulk_payment_journal_entry(
 	payment_date: str | None = None,
 	employees: list | str | None = None,
 ):
+	"""Create one Bank/Cash JE debiting Payroll Payable for unpaid submitted rows."""
 	if not batch_name or not pay_from_account:
 		frappe.throw(_("Batch and pay-from account are required."))
 
@@ -962,6 +994,7 @@ def create_bulk_payment_journal_entry(
 
 @frappe.whitelist()
 def create_bulk_accrual_journal_entry(batch_name: str):
+	"""Create accrual JE from submitted slips (reuses Payroll Entry accounting)."""
 	batch, salary_slips = _get_batch_submitted_salary_slips(batch_name)
 	pending_slips = [slip for slip in salary_slips if not slip.journal_entry]
 	if not pending_slips:
@@ -1057,6 +1090,11 @@ def sync_salary_structure_assignment_base(assignment_name: str, base: float):
 		frappe.throw(_("Salary Structure Assignment {0} not found.").format(assignment_name))
 	frappe.db.set_value("Salary Structure Assignment", assignment_name, "base", base, update_modified=True)
 	return {"assignment_name": assignment_name, "base": base}
+
+
+# ---------------------------------------------------------------------------
+# Salary slip lifecycle & batch processing
+# ---------------------------------------------------------------------------
 
 
 def _get_salary_structure_assignment(employee: str, payroll_frequency: str, start_date: str, end_date: str):
@@ -1281,6 +1319,7 @@ def _structure_needs_base_fallback(structure_doc) -> bool:
 
 
 def _manual_base_amount(row, manual_salary_basis: str | None, ctc: float, daily: float) -> float:
+	"""Pakistan monthly basis: CTC ÷ 30 × eligible days (full month / payment / absent)."""
 	basis = manual_salary_basis or "Full Month"
 	if basis == "By Payment Days":
 		days = flt(row.get("payment_days"))
@@ -1297,6 +1336,7 @@ def _calculate_batch_base_amount(
 	manual_salary_basis: str | None = None,
 	overtime_with_salary: int | bool = 0,
 ) -> float:
+	"""Compute base salary amount per calculation mode before Additional Salary sync."""
 	ctc = flt(row.get("ctc"))
 	daily = flt(ctc / 30) if ctc else 0
 

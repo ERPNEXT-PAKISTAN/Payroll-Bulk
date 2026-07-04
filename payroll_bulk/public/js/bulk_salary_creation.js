@@ -1,6 +1,4 @@
-// Bulk Salary Creation — entry point (loads modules)
-frappe.provide("payroll_bulk.bulk_salary");
-
+// Bulk Salary Creation — form entry point (loads desk UI modules).
 const BS_COMPLETED_STATUSES = ["Completed", "Completed With Errors"];
 
 function bs_is_completed_batch(doc) {
