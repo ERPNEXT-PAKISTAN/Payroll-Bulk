@@ -650,6 +650,11 @@ class _BulkAccrualAdapter:
 		submit_journal_entry=False,
 		employee_wise_accounting_enabled=False,
 	):
+		for row in accounts:
+			if row.get("reference_type") == self.doctype:
+				row["reference_type"] = None
+				row["reference_name"] = None
+
 		multi_currency = 1 if len(currencies) > 1 else 0
 		journal_entry = frappe.new_doc("Journal Entry")
 		journal_entry.voucher_type = voucher_type
@@ -814,8 +819,8 @@ def create_bulk_accrual_journal_entry(batch_name: str):
 		currencies,
 		payroll_payable_account,
 		voucher_type="Journal Entry",
-		user_remark=_("Accrual Journal Entry for salaries from {0} to {1}").format(
-			batch.start_date, batch.end_date
+		user_remark=_("Accrual Journal Entry for salaries from {0} to {1} (Batch {2})").format(
+			batch.start_date, batch.end_date, batch.name
 		),
 		submitted_salary_slips=pending_slips,
 		submit_journal_entry=True,

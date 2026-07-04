@@ -2035,18 +2035,19 @@ function bs_open_submitted_slips() {
   });
 }
 
-async function bs_sync_batch_from_slips(frm) {
+async function bs_sync_batch_from_slips(frm, options = {}) {
   if (!frm?.doc?.name) return false;
   try {
     const res = await bs_call("payroll_bulk.api.sync_bulk_batch_slip_status", { batch_name: frm.doc.name });
-    if ((res.message?.updated_count || 0) > 0) {
+    const updated = (res.message?.updated_count || 0) > 0;
+    if (updated && !options.skip_reload) {
       await frm.reload_doc();
-      return true;
     }
+    return updated;
   } catch (error) {
     console.warn("Batch slip status sync failed:", error);
+    return false;
   }
-  return false;
 }
 
 async function bs_submit_draft_slips() {
@@ -2057,7 +2058,10 @@ async function bs_submit_draft_slips() {
   );
   if (!draft_rows.length) {
     frappe.show_alert({ message: "No draft Salary Slips found — all linked slips are already submitted.", indicator: "green" }, 4);
-    if (frm && bs_is_completed_batch(frm.doc)) render_submitted_view(frm);
+    if (frm && bs_is_completed_batch(frm.doc)) {
+      window._bs._completed_view_batch = null;
+      render_submitted_view(frm);
+    }
     return;
   }
 
@@ -2103,7 +2107,10 @@ async function bs_submit_draft_slips() {
       bs_render_live_summary(frm);
     }
     frappe.show_alert({ message: "Draft Salary Slips submitted.", indicator: "green" }, 4);
-    if (frm && bs_is_completed_batch(frm.doc)) render_submitted_view(frm);
+    if (frm && bs_is_completed_batch(frm.doc)) {
+      window._bs._completed_view_batch = null;
+      render_submitted_view(frm);
+    }
   } catch (error) {
     frappe.msgprint({ title: "Submit Error", message: error.message || String(error), indicator: "red" });
   } finally {
@@ -2331,10 +2338,32 @@ async function bs_load_source_data() {
 function render_submitted_view(frm) {
   window._bs.frm = frm;
   const $body = frm.layout.wrapper.find(".form-page");
+  const batch_name = frm.doc.name;
 
-  bs_sync_batch_from_slips(frm).finally(() => {
-    frm.reload_doc().then(() => render_submitted_view_content(frm, $body));
-  });
+  if (window._bs._completed_view_batch === batch_name) {
+    render_submitted_view_content(frm, $body);
+    return;
+  }
+
+  if (window._bs._sync_in_flight === batch_name) {
+    return;
+  }
+  window._bs._sync_in_flight = batch_name;
+
+  bs_sync_batch_from_slips(frm, { skip_reload: true })
+    .then(async (updated) => {
+      if (updated) {
+        await frm.reload_doc();
+      }
+      window._bs._completed_view_batch = batch_name;
+      render_submitted_view_content(frm, $body);
+    })
+    .catch(() => {
+      render_submitted_view_content(frm, $body);
+    })
+    .finally(() => {
+      window._bs._sync_in_flight = null;
+    });
 }
 
 function render_submitted_view_content(frm, $body) {
