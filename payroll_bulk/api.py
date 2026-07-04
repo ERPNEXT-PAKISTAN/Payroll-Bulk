@@ -960,6 +960,8 @@ def create_bulk_payment_journal_entry(
 	}
 
 
+@frappe.whitelist()
+def create_bulk_accrual_journal_entry(batch_name: str):
 	batch, salary_slips = _get_batch_submitted_salary_slips(batch_name)
 	pending_slips = [slip for slip in salary_slips if not slip.journal_entry]
 	if not pending_slips:
