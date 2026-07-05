@@ -261,9 +261,8 @@ def _base_columns(earning_components, deduction_components):
 def _register_col_width_pct(fieldname, fieldtype):
 	weights = {
 		"si_no": 2.5,
-		"employee_name": 11,
-		"batch": 7,
-		"period": 8,
+		"employee_name": 13,
+		"batch": 8,
 		"gross_pay": 5.5,
 		"total_deductions": 5.5,
 		"net_pay": 5.5,
@@ -295,8 +294,16 @@ def _register_print_styles(print_columns):
 	return font_size, cell_pad, col_styles
 
 
+def _register_format_money(value, currency):
+	return frappe.utils.fmt_money(value, currency=currency, precision=0)
+
+
 def _render_register_print_html(columns, data, period_label, currency, auto_print=False):
-	print_columns = [column for column in columns if column.get("fieldname") not in ("company", "payroll_frequency")]
+	print_columns = [
+		column
+		for column in columns
+		if column.get("fieldname") not in ("company", "payroll_frequency", "period")
+	]
 	font_size, cell_pad, col_styles = _register_print_styles(print_columns)
 	header = "".join(f"<th>{frappe.utils.escape_html(column.get('label') or '')}</th>" for column in print_columns)
 	body_rows = []
@@ -307,7 +314,7 @@ def _render_register_print_html(columns, data, period_label, currency, auto_prin
 			fieldname = column.get("fieldname")
 			value = row.get(fieldname)
 			if column.get("fieldtype") == "Currency" and value not in (None, ""):
-				display = frappe.format_value(value, {"fieldtype": "Currency", "options": currency, "precision": 0})
+				display = _register_format_money(value, currency)
 				cells.append(f'<td class="num">{frappe.utils.escape_html(display)}</td>')
 			elif fieldname == "employee_name" and row_class in ("department", "subtotal", "grand_total"):
 				cells.append(f'<td class="text bold" colspan="1">{frappe.utils.escape_html(str(value))}</td>')

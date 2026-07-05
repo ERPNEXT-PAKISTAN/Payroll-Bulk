@@ -8,10 +8,10 @@
   "custom_format": 1,
   "disabled": 0,
   "font": "Default",
-  "font_size": 12,
+  "font_size": 10,
   "align": "Left",
-  "margin_top": 10,
-  "margin_bottom": 10,
-  "margin_left": 10,
-  "margin_right": 10
+  "margin_top": 8,
+  "margin_bottom": 8,
+  "margin_left": 8,
+  "margin_right": 8
 }
