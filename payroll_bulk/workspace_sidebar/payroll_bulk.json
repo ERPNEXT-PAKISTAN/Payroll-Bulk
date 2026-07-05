@@ -329,9 +329,29 @@
    "link_type": "Report",
    "show_arrow": 0,
    "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "indent": 1,
+   "keep_closed": 1,
+   "label": "Operations ERP",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Section Break"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "indent": 1,
+   "keep_closed": 1,
+   "label": "Setup ERP",
+   "link_type": "DocType",
+   "show_arrow": 0,
+   "type": "Section Break"
   }
  ],
- "modified": "2026-07-05 17:42:29.153588",
+ "modified": "2026-07-05 19:48:15.691966",
  "modified_by": "Administrator",
  "module": "Payroll Bulk",
  "name": "Payroll Bulk",

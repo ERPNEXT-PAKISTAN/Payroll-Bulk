@@ -9,10 +9,9 @@ def execute(filters=None):
 	filters = frappe._dict(filters or {})
 	columns = [
 		{"label": "Batch", "fieldname": "parent", "fieldtype": "Link", "options": "Bulk Salary Creation", "width": 160},
+		{"label": "Employee Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 160},
 		{"label": "Company", "fieldname": "company", "fieldtype": "Link", "options": "Company", "width": 130},
 		{"label": "Posting Date", "fieldname": "posting_date", "fieldtype": "Date", "width": 100},
-		{"label": "Employee", "fieldname": "employee", "fieldtype": "Link", "options": "Employee", "width": 120},
-		{"label": "Employee Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 160},
 		{"label": "Advance Balance", "fieldname": "advance_balance", "fieldtype": "Currency", "width": 120},
 		{"label": "Advance Deduct", "fieldname": "adv_deduct", "fieldtype": "Currency", "width": 120},
 		{"label": "Remaining", "fieldname": "remaining_advance", "fieldtype": "Currency", "width": 120},

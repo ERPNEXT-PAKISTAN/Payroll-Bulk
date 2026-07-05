@@ -12,6 +12,7 @@ def after_install():
 	_normalize_payroll_bulk_settings()
 	_ensure_reports()
 	_ensure_pages()
+	_ensure_print_formats()
 	_cleanup_duplicate_dashboard_artifacts()
 	_ensure_workspace_dashboard()
 
@@ -22,6 +23,7 @@ def after_migrate():
 	_normalize_payroll_bulk_settings()
 	_ensure_reports()
 	_ensure_pages()
+	_ensure_print_formats()
 	_ensure_currency_precision()
 	_cleanup_duplicate_dashboard_artifacts()
 	_ensure_workspace_dashboard()
@@ -232,6 +234,35 @@ def _ensure_reports():
 			continue
 		doc = frappe.get_doc(data)
 		doc.insert(ignore_permissions=True)
+
+
+def _ensure_print_formats():
+	import os
+
+	pf_dir = frappe.get_app_path("payroll_bulk", "payroll_bulk", "print_format", "payroll_bulk_salary_slip")
+	html_path = os.path.join(pf_dir, "payroll_bulk_salary_slip.html")
+	json_path = os.path.join(pf_dir, "payroll_bulk_salary_slip.json")
+	if not os.path.isfile(html_path) or not os.path.isfile(json_path):
+		return
+
+	with open(json_path) as handle:
+		meta = json.load(handle)
+	with open(html_path) as handle:
+		html = handle.read()
+
+	name = meta.get("name") or "Payroll Bulk Salary Slip"
+	if frappe.db.exists("Print Format", name):
+		frappe.db.set_value(
+			"Print Format",
+			name,
+			{"html": html, "disabled": 0, "custom_format": 1, "print_format_type": "Jinja"},
+			update_modified=False,
+		)
+		return
+
+	doc = frappe.get_doc(meta)
+	doc.html = html
+	doc.insert(ignore_permissions=True)
 
 
 PB_PAGES = [
@@ -583,60 +614,7 @@ def _sync_payroll_bulk_workspace(card_names=None, chart_name=None, payment_chart
 	ws.append("charts", {"chart_name": payment_chart_name, "label": "Payment Overview"})
 	ws.append("charts", {"chart_name": row_chart_name, "label": "Row Status"})
 
-	existing = {(link.link_to, link.link_type) for link in ws.links}
-	for page_name, page_label in PB_PAGES:
-		key = (page_name, "Page")
-		if key in existing:
-			continue
-		ws.append(
-			"links",
-			{
-				"label": page_label,
-				"link_to": page_name,
-				"link_type": "Page",
-				"type": "Link",
-			},
-		)
-	for report_name, ref_doctype in PB_REPORTS:
-		key = (report_name, "Report")
-		if key in existing:
-			for link in ws.links:
-				if link.link_to == report_name and link.link_type == "Report":
-					link.is_query_report = 1
-					link.report_ref_doctype = ref_doctype
-			continue
-		ws.append(
-			"links",
-			{
-				"label": report_name,
-				"link_to": report_name,
-				"link_type": "Report",
-				"report_ref_doctype": ref_doctype,
-				"type": "Link",
-				"is_query_report": 1,
-			},
-		)
-
-	def append_card_links(card_label, links):
-		if not any(link.type == "Card Break" and link.label == card_label for link in ws.links):
-			return
-		for label, link_to, link_type in links:
-			if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
-				continue
-			if any(item.link_to == link_to and item.link_type == link_type for item in ws.links):
-				continue
-			ws.append(
-				"links",
-				{
-					"label": label,
-					"link_to": link_to,
-					"link_type": link_type,
-					"type": "Link",
-				},
-			)
-
-	append_card_links("Operations", PB_OPERATIONS_LINKS)
-	append_card_links("Setup", PB_SETUP_LINKS)
+	_rebuild_workspace_card_links(ws)
 
 	keep_shortcuts = [row for row in ws.shortcuts if row.type not in ("Report", "Page", "DocType")]
 	ws.shortcuts = []
@@ -690,6 +668,75 @@ def _sync_payroll_bulk_workspace(card_names=None, chart_name=None, payment_chart
 
 	ws.save(ignore_permissions=True)
 	_sync_payroll_bulk_sidebar()
+
+
+def _workspace_link_row(label, link_to, link_type, **kwargs):
+	row = {
+		"label": label,
+		"link_to": link_to,
+		"link_type": link_type,
+		"type": "Link",
+		"hidden": 0,
+		"is_query_report": 0,
+		"onboard": 0,
+		"link_count": 0,
+	}
+	row.update(kwargs)
+	return row
+
+
+def _workspace_card_break(label, link_count):
+	return {
+		"type": "Card Break",
+		"label": label,
+		"link_type": "DocType",
+		"link_count": link_count,
+		"hidden": 0,
+		"is_query_report": 0,
+		"onboard": 0,
+	}
+
+
+def _rebuild_workspace_card_links(ws):
+	operations = [
+		_workspace_link_row("Bulk Salary Creation", "Bulk Salary Creation", "DocType"),
+		_workspace_link_row("Bulk Salary Creation Employee", "Bulk Salary Creation Employee", "DocType"),
+	]
+	for label, link_to, link_type in PB_OPERATIONS_LINKS:
+		if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
+			continue
+		operations.append(_workspace_link_row(label, link_to, link_type))
+
+	setup = [_workspace_link_row("Payroll Bulk Settings", "Payroll Bulk Settings", "DocType")]
+	for label, link_to, link_type in PB_SETUP_LINKS:
+		if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
+			continue
+		setup.append(_workspace_link_row(label, link_to, link_type))
+
+	reports = []
+	for report_name, ref_doctype in PB_REPORTS:
+		reports.append(
+			_workspace_link_row(
+				report_name,
+				report_name,
+				"Report",
+				is_query_report=1,
+				report_ref_doctype=ref_doctype,
+			)
+		)
+	for page_name, page_label in PB_PAGES:
+		reports.append(_workspace_link_row(page_label, page_name, "Page"))
+
+	ws.links = []
+	ws.append("links", _workspace_card_break("Operations", len(operations)))
+	for link in operations:
+		ws.append("links", link)
+	ws.append("links", _workspace_card_break("Setup", len(setup)))
+	for link in setup:
+		ws.append("links", link)
+	ws.append("links", _workspace_card_break("Reports", len(reports)))
+	for link in reports:
+		ws.append("links", link)
 
 
 def _sync_payroll_bulk_sidebar():

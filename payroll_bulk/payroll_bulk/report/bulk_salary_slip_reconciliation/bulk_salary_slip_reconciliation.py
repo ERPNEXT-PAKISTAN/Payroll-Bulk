@@ -10,8 +10,7 @@ from payroll_bulk.payroll_bulk.report.report_utils import pb_money, pb_format_co
 def execute(filters=None):
 	filters = frappe._dict(filters or {})
 	columns = [
-		{"label": "Employee", "fieldname": "employee", "fieldtype": "Link", "options": "Employee", "width": 110},
-		{"label": "Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 150},
+		{"label": "Employee Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 150},
 		{"label": "Department", "fieldname": "department", "fieldtype": "Link", "options": "Department", "width": 120},
 		{"label": "Salary Slip", "fieldname": "salary_slip", "fieldtype": "Link", "options": "Salary Slip", "width": 140},
 		{"label": "Slip Status", "fieldname": "salary_slip_status", "fieldtype": "Data", "width": 90},

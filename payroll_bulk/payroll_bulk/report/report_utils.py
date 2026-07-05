@@ -24,8 +24,6 @@ def pb_col(label, fieldname, fieldtype, width=120, **kwargs):
 TRAILING_STANDARD_FIELDS = frozenset(
 	{
 		"company",
-		"employee",
-		"employee_name",
 		"department",
 		"payroll_frequency",
 	}
@@ -36,7 +34,10 @@ def pb_reorder_standard_columns(columns):
 	leading = []
 	trailing = []
 	for column in columns or []:
-		if column.get("fieldname") in TRAILING_STANDARD_FIELDS:
+		fieldname = column.get("fieldname")
+		if fieldname == "employee":
+			continue
+		if fieldname in TRAILING_STANDARD_FIELDS:
 			trailing.append(column)
 		else:
 			leading.append(column)
@@ -44,12 +45,16 @@ def pb_reorder_standard_columns(columns):
 
 
 def pb_format_columns(columns):
+	filtered = []
 	for column in columns or []:
+		if column.get("fieldname") == "employee":
+			continue
 		if column.get("fieldtype") == "Currency" and column.get("precision") is None:
 			column["precision"] = 0
 		if not column.get("width"):
 			column["width"] = 120
-	return pb_reorder_standard_columns(columns)
+		filtered.append(column)
+	return pb_reorder_standard_columns(filtered)
 
 
 def pb_round_row_amounts(row: dict) -> dict:

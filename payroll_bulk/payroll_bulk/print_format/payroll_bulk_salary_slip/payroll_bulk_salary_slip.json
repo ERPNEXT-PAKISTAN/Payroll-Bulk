@@ -1,0 +1,17 @@
+{
+  "doctype": "Print Format",
+  "name": "Payroll Bulk Salary Slip",
+  "doc_type": "Salary Slip",
+  "module": "Payroll Bulk",
+  "standard": "Yes",
+  "print_format_type": "Jinja",
+  "custom_format": 1,
+  "disabled": 0,
+  "font": "Default",
+  "font_size": 12,
+  "align": "Left",
+  "margin_top": 10,
+  "margin_bottom": 10,
+  "margin_left": 10,
+  "margin_right": 10
+}

@@ -11,9 +11,8 @@ def execute(filters=None):
 	columns = pb_format_columns(
 		[
 			{"label": "Salary Slip", "fieldname": "salary_slip", "fieldtype": "Link", "options": "Salary Slip", "width": 150},
-			{"label": "Batch", "fieldname": "batch", "fieldtype": "Link", "options": "Bulk Salary Creation", "width": 150},
-			{"label": "Employee", "fieldname": "employee", "fieldtype": "Link", "options": "Employee", "width": 110},
 			{"label": "Employee Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 160},
+			{"label": "Batch", "fieldname": "batch", "fieldtype": "Link", "options": "Bulk Salary Creation", "width": 150},
 			{"label": "Department", "fieldname": "department", "fieldtype": "Link", "options": "Department", "width": 120},
 			{"label": "Payroll Frequency", "fieldname": "payroll_frequency", "fieldtype": "Data", "width": 110},
 			{"label": "Period Start", "fieldname": "start_date", "fieldtype": "Date", "width": 100},
