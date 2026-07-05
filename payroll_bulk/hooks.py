@@ -242,7 +242,21 @@ ignore_links_on_delete = ["Bulk Salary Creation", "Bulk Salary Creation Employee
 
 
 fixtures = [
-	{"dt": "Custom Field", "filters": [["dt", "=", "Salary Slip"], ["fieldname", "in", ["bulk_salary_creation", "bulk_salary_creation_employee"]]]}
+	{
+		"dt": "Custom Field",
+		"filters": [
+			[
+				"dt",
+				"in",
+				["Salary Slip", "Additional Salary"],
+			],
+			[
+				"fieldname",
+				"in",
+				["bulk_salary_creation", "bulk_salary_creation_employee"],
+			],
+		],
+	}
 ]
 
 after_migrate = ["payroll_bulk.install.after_migrate"]

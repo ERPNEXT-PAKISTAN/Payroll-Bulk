@@ -155,8 +155,38 @@ function bs_get_row_display_status(row) {
 }
 
 function bs_row_has_validation_issue(row) {
-  return !!(row.structure_warning || !row.salary_structure_assignment || !row.payroll_payable_account);
+  return !!(
+    row.structure_warning
+    || !row.salary_structure_assignment
+    || !row.payroll_payable_account
+    || row._period_mismatch
+    || row._period_slip_foreign
+    || (row._foreign_additional_salaries || []).length
+  );
 }
+
+function bs_build_linked_docs_hint(row) {
+  const parts = [];
+  if (row.salary_slip) {
+    parts.push(`<button type="button" class="bs-link-chip" onclick="bs_open_doc('Salary Slip','${row.salary_slip}')">${row.salary_slip.split("/").slice(-1)[0]}</button>`);
+  } else if (row._period_salary_slip && row._period_slip_foreign) {
+    parts.push(`<span class="bs-link-chip bs-link-chip-warn" title="${frappe.utils.escape_html(row._period_salary_slip)}">Slip in ${frappe.utils.escape_html(row._period_salary_slip_batch || "other batch")}</span>`);
+  } else if (row._period_salary_slip) {
+    parts.push(`<button type="button" class="bs-link-chip" onclick="bs_open_doc('Salary Slip','${row._period_salary_slip}')">${row._period_salary_slip.split("/").slice(-1)[0]}</button>`);
+  }
+  const ads_count = (row._linked_additional_salaries || []).length || (row._batch_additional_salaries || []).length;
+  if (ads_count) {
+    parts.push(`<span class="bs-link-chip">ADS ×${ads_count}</span>`);
+  }
+  if ((row._foreign_additional_salaries || []).length) {
+    parts.push(`<span class="bs-link-chip bs-link-chip-warn">ADS in other batch</span>`);
+  }
+  if (row._period_mismatch) {
+    parts.push(`<span class="bs-link-chip bs-link-chip-warn">Period mismatch</span>`);
+  }
+  return parts.length ? `<div class="bs-linked-docs">${parts.join("")}</div>` : "";
+}
+window.bs_build_linked_docs_hint = bs_build_linked_docs_hint;
 
 function bs_should_show_component(item, show_empty) {
   if (show_empty || window._bs.show_empty_components) return true;
@@ -465,8 +495,9 @@ function inject_bs_styles() {
     .bs-notice-success{background:var(--bs-green-dim);border:1px solid #86efac;color:var(--bs-green)}
     .bs-notice-info{background:var(--bs-primary-soft);border:1px solid #bfdbfe;color:var(--bs-primary-deep)}
     .bs-notice-error{background:var(--bs-red-dim);border:1px solid #fca5a5;color:var(--bs-red)}
-
-    /* Table */
+    .bs-linked-docs{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+    .bs-link-chip{display:inline-flex;align-items:center;border:1px solid var(--bs-border);background:#fff;border-radius:999px;padding:1px 7px;font-size:10px;color:var(--bs-muted);cursor:pointer}
+    .bs-link-chip-warn{border-color:#fcd34d;background:var(--bs-amber-dim);color:var(--bs-amber)}
     .bs-table-scroll{max-height:72vh;overflow:auto;border:1px solid var(--bs-border);border-radius:var(--bs-radius);background:var(--bs-surface);box-shadow:var(--bs-shadow);position:relative;isolation:isolate}
     .bs-table-scroll > .bs-table-toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:0;padding:8px 10px;background:var(--bs-surface);border-bottom:1px solid var(--bs-border);flex-shrink:0}
     .bs-table-wrap{border:none;border-radius:0;overflow:visible;margin-bottom:4px;background:transparent;box-shadow:none}

@@ -193,10 +193,19 @@ function bs_period_bounds_for_frequency(frequency, posting_date) {
   return { start_date, end_date };
 }
 
+function bs_same_calendar_month(date_a, date_b) {
+  if (!date_a || !date_b) return true;
+  const a = frappe.datetime.str_to_obj(date_a);
+  const b = frappe.datetime.str_to_obj(date_b);
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
 function bs_period_is_consistent(period) {
   if (!period?.start_date || !period?.end_date || !period?.posting_date) return false;
   if (period.start_date > period.end_date) return false;
   if (period.posting_date < period.start_date || period.posting_date > period.end_date) return false;
+  if (!bs_same_calendar_month(period.start_date, period.end_date)) return false;
+  if (!bs_same_calendar_month(period.start_date, period.posting_date)) return false;
   if (period.month && bs_month_from_date(period.start_date) && bs_month_from_date(period.start_date) !== period.month) {
     return false;
   }
@@ -1664,6 +1673,8 @@ async function render_main_ui(frm) {
   const finish_init = async () => {
     bs_merge_saved_rows_from_frm(frm);
     await bs_restore_source_controls_from_doc(frm);
+    await bs_hydrate_batch_additional_salaries(frm);
+    await bs_hydrate_batch_period_artifacts(frm);
     window._bs.rows.forEach(recalc_row);
     bs_render_table();
     bs_render_live_summary(frm);
@@ -2210,6 +2221,9 @@ function bs_build_row_menu_items(r) {
   const can_unlink_existing = r.salary_slip && !r.salary_slip_status && r.status === "Skipped";
   const items = [];
   if (r.salary_slip) items.push(`<button type="button" class="bs-menu-item" onclick="bs_open_doc('Salary Slip','${r.salary_slip}')">Open Salary Slip</button>`);
+  (r._linked_additional_salaries || []).slice(0, 5).forEach((ads) => {
+    items.push(`<button type="button" class="bs-menu-item" onclick="bs_open_doc('Additional Salary','${ads.name}')">ADS: ${frappe.utils.escape_html(ads.salary_component || ads.name)}</button>`);
+  });
   if (r.salary_structure_assignment) items.push(`<button type="button" class="bs-menu-item" onclick="bs_open_doc('Salary Structure Assignment','${r.salary_structure_assignment}')">Open Assignment</button>`);
   else items.push(`<button type="button" class="bs-menu-item" onclick="bs_new_assignment('${r.employee}','${r.salary_structure || ""}')">New Assignment</button>`);
   items.push(`<button type="button" class="bs-menu-item" onclick="bs_reprocess_row(${r._id},0)">Recreate Draft</button>`);
@@ -2431,7 +2445,7 @@ function bs_render_table() {
         <td class="bs-td bs-td-num bs-col-gross"><div class="bs-money-main bs-money-gross">${fmt_total(r.gross)}</div></td>
         <td class="bs-td bs-td-num bs-col-adv">${adv_summary}</td>
         <td class="bs-td bs-td-num bs-col-net"><div class="bs-money-main bs-money-net">${fmt_total(r.net)}</div></td>
-        <td class="bs-td bs-col-status"><span class="bs-status-badge bs-status-${display_status.cls}">${display_status.label}</span>${structure_hint ? `<div class="bs-work-sub">${structure_hint}</div>` : ""}</td>
+        <td class="bs-td bs-col-status"><span class="bs-status-badge bs-status-${display_status.cls}">${display_status.label}</span>${bs_build_linked_docs_hint(r)}${structure_hint ? `<div class="bs-work-sub">${structure_hint}</div>` : ""}</td>
         <td class="bs-td bs-col-menu">
           <div class="bs-menu-wrap" data-row-id="${r._id}">
             <button type="button" class="bs-menu-btn" onclick="bs_toggle_row_menu(${r._id}, event)">⋮</button>
@@ -3099,6 +3113,124 @@ function bs_build_advances_panel_html(r) {
     </span>
   </div>`;
 }
+
+async function bs_hydrate_batch_additional_salaries(frm) {
+  if (!frm?.doc?.name || !window._bs.rows?.length) return;
+  try {
+    const res = await bs_call("payroll_bulk.api.get_batch_additional_salary_amounts", {
+      batch_name: frm.doc.name,
+    });
+    const by_employee = res.message || res || {};
+    window._bs.rows.forEach((row) => {
+      const entry = by_employee[row.employee];
+      if (!entry) return;
+      row._batch_additional_salaries = entry.additional_salaries || [];
+      if (entry.adv_deduct > 0) {
+        row.adv_deduct = entry.adv_deduct;
+        row.adv_fetched = true;
+        bs_hydrate_row_advances(row);
+        if (row.advances?.[0]) row.advances[0].deduct = row.adv_deduct;
+      }
+      (entry.components || []).forEach((comp) => {
+        if (comp.type === "Deduction" && (comp.salary_component || "").toLowerCase().includes("advance")) {
+          return;
+        }
+        const key = bs_normalize_component_key(comp.type, comp.salary_component);
+        const existing = (row.components || []).find((c) => c.key === key);
+        if (existing) {
+          if (!existing.amount || existing.auto_calculated) {
+            existing.amount = parseFloat(comp.amount || 0);
+          }
+        } else {
+          row.components = row.components || [];
+          row.components.push({
+            key,
+            component: comp.salary_component,
+            label: comp.salary_component,
+            type: comp.type || "Earning",
+            amount: parseFloat(comp.amount || 0),
+            auto_calculated: false,
+            from_additional_salary: true,
+          });
+        }
+      });
+      recalc_row(row);
+    });
+  } catch (e) {
+    console.warn("Batch Additional Salary hydration:", e);
+  }
+}
+window.bs_hydrate_batch_additional_salaries = bs_hydrate_batch_additional_salaries;
+
+async function bs_hydrate_batch_period_artifacts(frm) {
+  if (!frm?.doc?.name || !window._bs.rows?.length) return;
+  try {
+    const res = await bs_call("payroll_bulk.api.get_batch_period_artifacts", { batch_name: frm.doc.name });
+    const payload = res.message || res || {};
+    const by_employee = payload.employees || {};
+    window._bs.batch_warnings = payload.batch_warnings || [];
+    window._bs.rows.forEach((row) => {
+      const entry = by_employee[row.employee];
+      if (!entry) return;
+      row._period_mismatch = !!entry.period_mismatch;
+      row._period_salary_slip = entry.period_salary_slip || "";
+      row._period_salary_slip_batch = entry.period_salary_slip_batch || "";
+      row._period_slip_foreign = !!entry.period_salary_slip_foreign;
+      row._linked_additional_salaries = entry.linked_additional_salaries || [];
+      row._foreign_additional_salaries = (entry.period_additional_salaries || []).filter((ads) => ads.foreign_batch);
+      if (!row.salary_slip && entry.linked_salary_slip) {
+        row.salary_slip = entry.linked_salary_slip;
+        row.salary_slip_status = entry.linked_salary_slip_status || row.salary_slip_status || "";
+      }
+      if (!row.adv_deduct && entry.linked_additional_salaries?.length) {
+        const adv_total = entry.linked_additional_salaries
+          .filter((ads) => ads.type === "Deduction" && (ads.salary_component || "").toLowerCase().includes("advance"))
+          .reduce((sum, ads) => sum + parseFloat(ads.amount || 0), 0);
+        if (adv_total > 0) {
+          row.adv_deduct = adv_total;
+          row.adv_fetched = true;
+        }
+      }
+    });
+    bs_render_batch_warnings(frm);
+  } catch (e) {
+    console.warn("Batch period artifact hydration:", e);
+  }
+}
+window.bs_hydrate_batch_period_artifacts = bs_hydrate_batch_period_artifacts;
+
+function bs_render_batch_warnings(frm) {
+  const warnings = window._bs.batch_warnings || [];
+  const period_ok = bs_period_is_consistent({
+    start_date: frm.doc.start_date,
+    end_date: frm.doc.end_date,
+    posting_date: frm.doc.posting_date,
+    month: frm.doc.month,
+  });
+  const $wrap = $("#bs-main-wrap");
+  if (!$wrap.length) return;
+  $wrap.find("#bs-batch-warnings").remove();
+  const items = [];
+  if (!period_ok) {
+    items.push("Batch month / start / end / posting dates are not in the same calendar month.");
+  }
+  warnings.forEach((msg) => items.push(msg));
+  window._bs.rows.forEach((row) => {
+    if (row._period_slip_foreign && row._period_salary_slip) {
+      items.push(`${row.employee}: Salary Slip ${row._period_salary_slip} belongs to ${row._period_salary_slip_batch || "another batch"}.`);
+    }
+    (row._foreign_additional_salaries || []).forEach((ads) => {
+      items.push(`${row.employee}: Additional Salary ${ads.name} belongs to ${ads.batch_name || "another batch"}.`);
+    });
+  });
+  if (!items.length) return;
+  const html = `<div id="bs-batch-warnings" class="bs-notice bs-notice-warn" style="margin:12px 0">
+    <b>Existing payroll documents for this period</b><br>
+    ${items.map((msg) => frappe.utils.escape_html(msg)).join("<br>")}
+  </div>`;
+  $wrap.find(".bs-title-container").after(html);
+}
+window.bs_render_batch_warnings = bs_render_batch_warnings;
 
 async function fetch_advances_for_row(row) {
   if (!row?.employee) return;

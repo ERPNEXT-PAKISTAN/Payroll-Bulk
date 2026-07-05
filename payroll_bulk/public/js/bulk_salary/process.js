@@ -561,20 +561,40 @@ async function bs_prepare_salary_inputs(row, vals, batch_name) {
   }
 }
 
-async function bs_existing_salary_slip(row, vals) {
-  const res = await bs_call("frappe.client.get_list", {
-    doctype: "Salary Slip",
-    filters: {
-      employee: row.employee,
-      company: vals.company,
-      start_date: vals.start_date,
-      end_date: vals.end_date,
-      docstatus: ["<", 2],
-    },
-    fields: ["name"],
-    limit_page_length: 1,
+async function bs_existing_salary_slip(row, vals, frm) {
+  if (!row.row_name || !frm?.doc?.name) {
+    const res = await bs_call("frappe.client.get_list", {
+      doctype: "Salary Slip",
+      filters: {
+        employee: row.employee,
+        company: vals.company,
+        start_date: vals.start_date,
+        end_date: vals.end_date,
+        docstatus: ["<", 2],
+      },
+      fields: ["name", "bulk_salary_creation"],
+      limit_page_length: 1,
+    });
+    const slip = (res.message || [])[0];
+    if (!slip) return { name: "", foreign_batch: false, batch_name: "" };
+    const foreign = slip.bulk_salary_creation && slip.bulk_salary_creation !== frm.doc.name;
+    return { name: slip.name, foreign_batch: !!foreign, batch_name: slip.bulk_salary_creation || "" };
+  }
+
+  const res = await bs_call("payroll_bulk.api.resolve_existing_salary_slip_for_row", {
+    batch_name: frm.doc.name,
+    row_name: row.row_name,
+    company: vals.company,
+    start_date: vals.start_date,
+    end_date: vals.end_date,
   });
-  return (res.message || [])[0]?.name || "";
+  const msg = res.message || res || {};
+  return {
+    name: msg.name || "",
+    foreign_batch: !!msg.foreign_batch,
+    batch_name: msg.batch_name || "",
+    docstatus: msg.docstatus,
+  };
 }
 
 function bs_finish_slip_process(pw, results, frm) {
@@ -759,14 +779,47 @@ async function process_bulk(frm, vals) {
         throw new Error("Advance deduction cannot exceed advance balance.");
       }
 
-      const exists = await bs_existing_salary_slip(row, vals);
-      if (exists && !vals.replace_existing_slips) {
-        const slip_meta = await bs_call("frappe.client.get_value", {
-          doctype: "Salary Slip",
-          filters: { name: exists },
-          fieldname: ["docstatus"],
+      const exists_info = await bs_existing_salary_slip(row, vals, frm);
+      const exists = exists_info.name || "";
+      if (exists && exists_info.foreign_batch && !vals.replace_existing_slips) {
+        const batch_ref = exists_info.batch_name ? ` (batch ${exists_info.batch_name})` : "";
+        const msg = `Salary Slip ${exists} already exists for this period${batch_ref}. Tick Cancel and Recreate to replace it.`;
+        row.salary_slip = "";
+        row.status = "Failed";
+        row.salary_slip_status = "";
+        row.error_message = msg;
+        const child = bs_find_child_row(frm, row);
+        if (child) {
+          child.salary_slip = "";
+          child.status = row.status;
+          child.salary_slip_status = "";
+          child.error_message = row.error_message;
+        }
+        log(`<span class="bs-log-emp">${row.employee}</span> — ${msg}`, "error");
+        results.push({
+          employee: row.employee,
+          employee_name: row.employee_name,
+          slip_name: "",
+          ctc: row.ctc,
+          ot_amount: row.ot_amount,
+          gross: row.gross,
+          adv_deduct: row.adv_deduct,
+          net: row.net,
+          status: "Failed",
+          error: msg,
+          payment_entry: row.payment_entry || "",
         });
-        const slip_docstatus = parseInt(slip_meta.message?.docstatus || 0, 10);
+        has_failures = true;
+        continue;
+      }
+      if (exists && !vals.replace_existing_slips) {
+        const slip_docstatus = exists_info.docstatus != null
+          ? parseInt(exists_info.docstatus, 10)
+          : parseInt((await bs_call("frappe.client.get_value", {
+              doctype: "Salary Slip",
+              filters: { name: exists },
+              fieldname: ["docstatus"],
+            })).message?.docstatus || 0, 10);
         if (slip_docstatus === 1) {
           const msg = `Submitted slip <b>${exists}</b> already exists — tick <b>Cancel and Recreate</b> to create a new draft.`;
           row.salary_slip = exists;

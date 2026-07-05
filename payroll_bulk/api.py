@@ -1943,6 +1943,28 @@ def _upsert_additional_salary(
 		return
 
 	existing_rows = _get_existing_additional_salaries(row.employee, posting_date, component, batch_name)
+	foreign_rows = frappe.get_all(
+		"Additional Salary",
+		filters={
+			"employee": row.employee,
+			"salary_component": component,
+			"payroll_date": posting_date,
+			"ref_doctype": "Bulk Salary Creation",
+			"ref_docname": ["!=", batch_name],
+			"docstatus": ["<", 2],
+		},
+		fields=["name", "ref_docname", "docstatus"],
+		limit_page_length=10,
+	)
+	if foreign_rows:
+		other_batches = sorted({row.ref_docname for row in foreign_rows if row.ref_docname})
+		frappe.throw(
+			_(
+				"Additional Salary for {0} / {1} already exists in batch {2}. "
+				"Cancel that batch row first before creating here."
+			).format(row.employee, component, ", ".join(other_batches))
+		)
+
 	for existing_row in existing_rows:
 		doc = frappe.get_doc("Additional Salary", existing_row.name)
 		if (
@@ -1977,6 +1999,8 @@ def _upsert_additional_salary(
 			"ref_docname": batch_name,
 		}
 	)
+	if additional_salary.meta.get_field("bulk_salary_creation"):
+		additional_salary.bulk_salary_creation = batch_name
 	additional_salary.insert(ignore_permissions=True)
 	additional_salary.submit()
 	return additional_salary.name
@@ -2413,10 +2437,35 @@ def create_bulk_salary_slip(
 	if row.parent != batch_name:
 		frappe.throw(_("Employee row {0} does not belong to batch {1}.").format(row_name, batch_name))
 
-	if cancel_existing and row.salary_slip:
-		_cancel_or_delete_existing_slip(row.salary_slip)
-
 	batch = frappe.get_cached_doc("Bulk Salary Creation", batch_name)
+	validate_batch_period_dates(batch.start_date, batch.end_date, batch.posting_date, batch.get("month"))
+	if str(batch.start_date) != str(start_date) or str(batch.end_date) != str(end_date):
+		frappe.throw(
+			_("Batch period mismatch. Save the batch with start {0}, end {1} before creating slips.").format(
+				batch.start_date, batch.end_date
+			)
+		)
+
+	if cancel_existing:
+		slips_to_cancel = set()
+		if row.salary_slip:
+			slips_to_cancel.add(row.salary_slip)
+		resolved = _resolve_existing_salary_slip(
+			row.employee, company, start_date, end_date, batch_name, row_name
+		)
+		if resolved.get("name"):
+			slips_to_cancel.add(resolved["name"])
+		for slip_name in slips_to_cancel:
+			_cancel_or_delete_existing_slip(slip_name)
+		if row.salary_slip:
+			frappe.db.set_value(
+				"Bulk Salary Creation Employee",
+				row_name,
+				{"salary_slip": "", "salary_slip_status": "", "status": "Pending", "error_message": ""},
+				update_modified=False,
+			)
+			row.reload()
+
 	options = {"start_date": start_date, "end_date": end_date, "posting_date": posting_date}
 	_ensure_row_attendance_loaded(row, batch, options)
 	_ensure_row_manual_payment_days(row, batch)
@@ -2531,10 +2580,29 @@ def reprocess_bulk_salary_row(
 
 	batch = frappe.get_cached_doc("Bulk Salary Creation", batch_name)
 	if cint(cancel_existing):
+		resolved = _resolve_existing_salary_slip(
+			row.employee,
+			batch.company,
+			batch.start_date,
+			batch.end_date,
+			batch_name,
+			row_name,
+		)
+		slips_to_cancel = set()
 		if row.salary_slip:
-			_cancel_or_delete_existing_slip(row.salary_slip)
-		else:
-			_cancel_batch_additional_salaries(batch_name, employee=row.employee)
+			slips_to_cancel.add(row.salary_slip)
+		if resolved.get("name"):
+			slips_to_cancel.add(resolved["name"])
+		for slip_name in slips_to_cancel:
+			_cancel_or_delete_existing_slip(slip_name)
+		_cancel_batch_additional_salaries(batch_name, employee=row.employee)
+		frappe.db.set_value(
+			"Bulk Salary Creation Employee",
+			row_name,
+			{"salary_slip": "", "salary_slip_status": "", "status": "Pending", "error_message": ""},
+			update_modified=False,
+		)
+		row.reload()
 
 	sync_bulk_row_additional_salaries(
 		batch_name=batch_name,
@@ -2584,24 +2652,305 @@ def process_bulk_batch_rows(batch_name: str, submit_slip: int | bool = 0, replac
 BULK_BACKGROUND_ROW_THRESHOLD = 20
 
 
+def validate_batch_period_dates(start_date: str, end_date: str, posting_date: str | None = None, month: str | None = None):
+	"""Ensure batch header dates are one calendar month and posting date is in range."""
+	if not start_date or not end_date:
+		frappe.throw(_("Batch start and end dates are required."))
+	start = getdate(start_date)
+	end = getdate(end_date)
+	posting = getdate(posting_date) if posting_date else end
+	if start > end:
+		frappe.throw(_("Start Date cannot be after End Date."))
+	if (start.year, start.month) != (end.year, end.month):
+		frappe.throw(
+			_("Start Date and End Date must be in the same calendar month. Got {0} to {1}.").format(
+				start_date, end_date
+			)
+		)
+	if posting < start or posting > end:
+		frappe.throw(
+			_("Posting Date must fall within the salary period ({0} to {1}).").format(start_date, end_date)
+		)
+	if (posting.year, posting.month) != (start.year, start.month):
+		frappe.throw(
+			_("Posting Date must be in the same month as the salary period ({0}).").format(start_date[:7])
+		)
+	if month and month != start.strftime("%B"):
+		frappe.throw(
+			_("Month field ({0}) does not match Start Date month ({1}).").format(month, start.strftime("%B"))
+		)
+
+
+def validate_salary_slip_batch_link(
+	slip_name: str,
+	batch_name: str,
+	start_date: str,
+	end_date: str,
+	employee: str | None = None,
+):
+	"""Reject salary slips whose period or bulk batch link does not match."""
+	if not slip_name or not frappe.db.exists("Salary Slip", slip_name):
+		return
+	slip = frappe.db.get_value(
+		"Salary Slip",
+		slip_name,
+		["employee", "start_date", "end_date", "bulk_salary_creation", "docstatus"],
+		as_dict=True,
+	)
+	if not slip:
+		return
+	if employee and slip.employee != employee:
+		frappe.throw(
+			_("Salary Slip {0} belongs to {1}, not {2}.").format(slip_name, slip.employee, employee)
+		)
+	if str(slip.start_date) != str(start_date) or str(slip.end_date) != str(end_date):
+		frappe.throw(
+			_(
+				"Salary Slip {0} is for {1} to {2}, but this batch period is {3} to {4}. "
+				"Unlink the slip or correct the batch dates."
+			).format(slip_name, slip.start_date, slip.end_date, start_date, end_date)
+		)
+	slip_batch = slip.bulk_salary_creation or ""
+	if slip_batch and batch_name and slip_batch != batch_name:
+		frappe.throw(
+			_("Salary Slip {0} is already linked to batch {1} and cannot be linked to {2}.").format(
+				slip_name, slip_batch, batch_name
+			)
+		)
+
+
 def _parse_bulk_batch_options(options):
 	if isinstance(options, str):
 		options = frappe.parse_json(options)
 	return options or {}
 
 
-def _get_existing_period_salary_slip(employee: str, company: str, start_date: str, end_date: str) -> str | None:
-	return frappe.db.get_value(
+def _resolve_existing_salary_slip(
+	employee: str,
+	company: str,
+	start_date: str,
+	end_date: str,
+	batch_name: str | None = None,
+	row_name: str | None = None,
+) -> dict:
+	"""Find an existing salary slip for the period and whether it belongs to this batch."""
+	slips = frappe.get_all(
 		"Salary Slip",
-		{
+		filters={
 			"employee": employee,
 			"company": company,
 			"start_date": start_date,
 			"end_date": end_date,
 			"docstatus": ["<", 2],
 		},
-		"name",
+		fields=["name", "bulk_salary_creation", "bulk_salary_creation_employee", "docstatus"],
+		order_by="modified desc",
+		limit_page_length=20,
 	)
+	if not slips:
+		return {}
+
+	row_slip = ""
+	if row_name and frappe.db.exists("Bulk Salary Creation Employee", row_name):
+		row_slip = frappe.db.get_value("Bulk Salary Creation Employee", row_name, "salary_slip") or ""
+
+	for slip in slips:
+		if row_slip and slip.name == row_slip:
+			return _existing_slip_resolution(slip, batch_name)
+
+	if batch_name:
+		for slip in slips:
+			if slip.bulk_salary_creation == batch_name:
+				return _existing_slip_resolution(slip, batch_name)
+
+	return _existing_slip_resolution(slips[0], batch_name)
+
+
+def _existing_slip_resolution(slip, batch_name: str | None) -> dict:
+	slip_batch = slip.bulk_salary_creation or ""
+	foreign_batch = bool(
+		slip_batch and batch_name and slip_batch != batch_name
+	) or bool(not slip_batch and batch_name)
+	return {
+		"name": slip.name,
+		"batch_name": slip_batch,
+		"foreign_batch": foreign_batch,
+		"docstatus": slip.docstatus,
+	}
+
+
+def _get_existing_period_salary_slip(
+	employee: str,
+	company: str,
+	start_date: str,
+	end_date: str,
+	batch_name: str | None = None,
+	row_name: str | None = None,
+) -> str | None:
+	resolved = _resolve_existing_salary_slip(
+		employee, company, start_date, end_date, batch_name, row_name
+	)
+	if not resolved:
+		return None
+	if resolved.get("foreign_batch") and batch_name:
+		return None
+	return resolved.get("name")
+
+
+@frappe.whitelist()
+def resolve_existing_salary_slip_for_row(
+	batch_name: str,
+	row_name: str,
+	company: str,
+	start_date: str,
+	end_date: str,
+):
+	row = frappe.get_doc("Bulk Salary Creation Employee", row_name)
+	if row.parent != batch_name:
+		frappe.throw(_("Employee row {0} does not belong to batch {1}.").format(row_name, batch_name))
+	return _resolve_existing_salary_slip(
+		row.employee, company, start_date, end_date, batch_name, row_name
+	)
+
+
+@frappe.whitelist()
+def get_batch_additional_salary_amounts(batch_name: str):
+	"""Return submitted Additional Salary rows linked to a bulk batch (for UI hydration)."""
+	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
+		return {}
+
+	rows = frappe.get_all(
+		"Additional Salary",
+		filters={
+			"ref_doctype": "Bulk Salary Creation",
+			"ref_docname": batch_name,
+			"docstatus": 1,
+		},
+		fields=["employee", "salary_component", "amount", "type", "name"],
+		limit_page_length=500,
+	)
+	by_employee: dict[str, dict] = {}
+	for row in rows:
+		entry = by_employee.setdefault(
+			row.employee,
+			{"components": [], "adv_deduct": 0.0, "additional_salaries": []},
+		)
+		amount = flt(row.amount)
+		entry["components"].append(
+			{
+				"salary_component": row.salary_component,
+				"amount": amount,
+				"type": row.type,
+				"name": row.name,
+			}
+		)
+		entry["additional_salaries"].append(row.name)
+		component_lower = (row.salary_component or "").lower()
+		if row.type == "Deduction" and "advance" in component_lower:
+			entry["adv_deduct"] += amount
+	return by_employee
+
+
+@frappe.whitelist()
+def get_batch_period_artifacts(batch_name: str):
+	"""Return salary slips and additional salaries already linked or existing for the batch period."""
+	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
+		return {"employees": {}, "batch_warnings": []}
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	employees = [row.employee for row in batch.employees if row.employee]
+	by_employee: dict[str, dict] = {}
+	batch_warnings: list[str] = []
+
+	for row in batch.employees:
+		if not row.employee:
+			continue
+		entry = {
+			"row_name": row.name,
+			"linked_salary_slip": row.salary_slip or "",
+			"linked_salary_slip_status": row.salary_slip_status or "",
+			"linked_additional_salaries": [],
+			"period_salary_slip": "",
+			"period_salary_slip_batch": "",
+			"period_salary_slip_foreign": False,
+			"period_salary_slip_docstatus": None,
+			"period_additional_salaries": [],
+			"period_mismatch": False,
+		}
+		if row.salary_slip:
+			slip_dates = frappe.db.get_value(
+				"Salary Slip",
+				row.salary_slip,
+				["start_date", "end_date", "bulk_salary_creation", "docstatus"],
+				as_dict=True,
+			)
+			if slip_dates and (
+				str(slip_dates.start_date) != str(batch.start_date)
+				or str(slip_dates.end_date) != str(batch.end_date)
+			):
+				entry["period_mismatch"] = True
+				batch_warnings.append(
+					_("{0}: linked slip {1} is for {2} to {3}, batch is {4} to {5}.").format(
+						row.employee,
+						row.salary_slip,
+						slip_dates.start_date,
+						slip_dates.end_date,
+						batch.start_date,
+						batch.end_date,
+					)
+				)
+		by_employee[row.employee] = entry
+
+	if batch.start_date and batch.end_date:
+		for emp in employees:
+			entry = by_employee.get(emp) or {}
+			resolved = _resolve_existing_salary_slip(
+				emp, batch.company, batch.start_date, batch.end_date, batch_name, entry.get("row_name")
+			)
+			if resolved.get("name"):
+				entry["period_salary_slip"] = resolved["name"]
+				entry["period_salary_slip_batch"] = resolved.get("batch_name") or ""
+				entry["period_salary_slip_foreign"] = bool(resolved.get("foreign_batch"))
+				entry["period_salary_slip_docstatus"] = resolved.get("docstatus")
+
+			ads_filters = {
+				"employee": emp,
+				"payroll_date": batch.posting_date or batch.end_date,
+				"ref_doctype": "Bulk Salary Creation",
+				"docstatus": ["<", 2],
+			}
+			period_ads = frappe.get_all(
+				"Additional Salary",
+				filters=ads_filters,
+				fields=["name", "salary_component", "amount", "type", "ref_docname", "docstatus"],
+				limit_page_length=50,
+			)
+			for ads in period_ads:
+				item = {
+					"name": ads.name,
+					"salary_component": ads.salary_component,
+					"amount": flt(ads.amount),
+					"type": ads.type,
+					"batch_name": ads.ref_docname or "",
+					"docstatus": ads.docstatus,
+					"foreign_batch": ads.ref_docname not in ("", batch_name),
+				}
+				entry.setdefault("period_additional_salaries", []).append(item)
+				if ads.ref_docname == batch_name:
+					entry.setdefault("linked_additional_salaries", []).append(item)
+
+			by_employee[emp] = entry
+
+	return {
+		"employees": by_employee,
+		"batch_warnings": batch_warnings,
+		"period": {
+			"start_date": batch.start_date,
+			"end_date": batch.end_date,
+			"posting_date": batch.posting_date,
+			"month": batch.get("month") or "",
+		},
+	}
 
 
 def _set_bulk_job_progress(job_id: str, batch_name: str, processed: int, total: int, error: str | None = None):
@@ -2634,15 +2983,64 @@ def _process_batch_row(batch_name: str, row_name: str, options: dict):
 	posting_date = options["posting_date"]
 	payroll_frequency = options.get("payroll_frequency") or "Monthly"
 	batch = frappe.get_cached_doc("Bulk Salary Creation", batch_name)
+	validate_batch_period_dates(
+		batch.start_date, batch.end_date, batch.posting_date, batch.get("month")
+	)
 	_validate_employee_holiday_list(row.employee, start_date, end_date)
 	_ensure_row_attendance_loaded(row, batch, options)
 	_ensure_row_manual_payment_days(row, batch)
 	row.reload()
 	_validate_row_source_days(row, batch, start_date, end_date)
-	existing = _get_existing_period_salary_slip(row.employee, company, start_date, end_date)
+	resolved = _resolve_existing_salary_slip(
+		row.employee, company, start_date, end_date, batch_name, row_name
+	)
+	existing = resolved.get("name")
+	foreign_batch = resolved.get("foreign_batch")
+	foreign_batch_name = resolved.get("batch_name") or ""
+
+	if existing and foreign_batch and not cint(options.get("replace_existing_slips")):
+		message = _(
+			"Salary Slip {0} already exists for this period"
+			"{1}. Enable Cancel and Recreate to replace it."
+		).format(
+			existing,
+			f" (linked to batch {foreign_batch_name})" if foreign_batch_name else "",
+		)
+		frappe.db.set_value(
+			"Bulk Salary Creation Employee",
+			row_name,
+			{
+				"salary_slip": "",
+				"status": "Failed",
+				"error_message": message,
+				"salary_slip_status": "",
+			},
+			update_modified=False,
+		)
+		return {"failed": True, "error": message}
+
+	if existing and cint(options.get("replace_existing_slips")):
+		slips_to_cancel = {existing}
+		if row.salary_slip and row.salary_slip != existing:
+			slips_to_cancel.add(row.salary_slip)
+		for slip_name in slips_to_cancel:
+			_cancel_or_delete_existing_slip(slip_name)
+		frappe.db.set_value(
+			"Bulk Salary Creation Employee",
+			row_name,
+			{"salary_slip": "", "salary_slip_status": "", "status": "Pending", "error_message": ""},
+			update_modified=False,
+		)
+		row.reload()
+		existing = None
 
 	if existing and not cint(options.get("replace_existing_slips")):
-		slip_docstatus = frappe.db.get_value("Salary Slip", existing, "docstatus")
+		validate_salary_slip_batch_link(
+			existing, batch_name, start_date, end_date, employee=row.employee
+		)
+		slip_docstatus = resolved.get("docstatus")
+		if slip_docstatus is None:
+			slip_docstatus = frappe.db.get_value("Salary Slip", existing, "docstatus")
 		if slip_docstatus == 0 and cint(options.get("submit_slips")):
 			slip = frappe.get_doc("Salary Slip", existing)
 			try:

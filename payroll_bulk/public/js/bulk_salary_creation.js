@@ -52,6 +52,15 @@ frappe.ui.form.on("Bulk Salary Creation", {
     if (typeof bs_sync_period_from_header === "function" && !window._bs?._lock_batch_period) {
       bs_sync_period_from_header(frm);
     }
+    const period = {
+      start_date: frm.doc.start_date,
+      end_date: frm.doc.end_date,
+      posting_date: frm.doc.posting_date,
+      month: frm.doc.month,
+    };
+    if (period.start_date && period.end_date && typeof bs_period_is_consistent === "function" && !bs_period_is_consistent(period)) {
+      frappe.throw(__("Month, Start Date, End Date, and Posting Date must all be in the same calendar month."));
+    }
     if (typeof bs_sync_source_doc === "function" && window._bs?.frm === frm && window._bs?.source_ctrls) {
       const values = bs_collect_source_values(frm);
       Object.assign(frm.doc, values);

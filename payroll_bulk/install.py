@@ -25,6 +25,29 @@ def after_migrate():
 	_ensure_currency_precision()
 	_cleanup_duplicate_dashboard_artifacts()
 	_ensure_workspace_dashboard()
+	_sync_additional_salary_bulk_links()
+
+
+def _sync_additional_salary_bulk_links():
+	if not frappe.db.exists("DocType", "Additional Salary"):
+		return
+	meta = frappe.get_meta("Additional Salary")
+	if not meta.get_field("bulk_salary_creation"):
+		return
+	for row in frappe.get_all(
+		"Additional Salary",
+		filters={"ref_doctype": "Bulk Salary Creation"},
+		fields=["name", "ref_docname", "bulk_salary_creation"],
+		limit_page_length=0,
+	):
+		if row.ref_docname and row.bulk_salary_creation != row.ref_docname:
+			frappe.db.set_value(
+				"Additional Salary",
+				row.name,
+				"bulk_salary_creation",
+				row.ref_docname,
+				update_modified=False,
+			)
 
 
 def _disable_legacy_scripts():
