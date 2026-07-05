@@ -4,7 +4,7 @@ import frappe
 from frappe import _
 
 from payroll_bulk.api import get_batch_component_reconciliation
-from payroll_bulk.payroll_bulk.report.report_utils import pb_money
+from payroll_bulk.payroll_bulk.report.report_utils import pb_money, pb_format_columns
 
 
 def execute(filters=None):
@@ -26,7 +26,7 @@ def execute(filters=None):
 	]
 
 	if not filters.get("batch"):
-		return columns, [], _("Select a batch to reconcile components."), None, []
+		return pb_format_columns(columns), [], _("Select a batch to reconcile components."), None, []
 
 	result = get_batch_component_reconciliation(filters.batch)
 	rows = result.get("rows") or []
@@ -85,4 +85,4 @@ def execute(filters=None):
 		else:
 			message = _("Batch {0}: all component lines matched.").format(frappe.bold(filters.batch))
 
-	return columns, rows, message, chart, report_summary
+	return pb_format_columns(columns), rows, message, chart, report_summary

@@ -145,16 +145,19 @@ function pb_sync_legacy_piece_flags(frm) {
 
 function pb_toggle_source_fields(frm) {
   const mode = frm.doc.default_calculation_mode || "Manual";
-  const ot_source = frm.doc.default_overtime_source || "Manual";
   const piece_mode = mode === "Per Piece or Per Hour";
-  const show_source = ot_source === "Custom DocType" || piece_mode;
 
   frm.toggle_display("default_manual_salary_basis", mode === "Manual");
   frm.toggle_display("default_per_piece_basis", piece_mode);
 
-  ["overtime_doctype", "overtime_employee_field", "overtime_date_field", "overtime_hours_field"].forEach((fieldname) => {
-    frm.toggle_display(fieldname, show_source);
+  [
+    "overtime_doctype",
+    "overtime_employee_field",
+    "overtime_date_field",
+    "overtime_hours_field",
+    "overtime_qty_field",
+    "overtime_rate_field",
+  ].forEach((fieldname) => {
+    frm.toggle_display(fieldname, true);
   });
-  frm.toggle_display("overtime_qty_field", show_source && piece_mode);
-  frm.toggle_display("overtime_rate_field", show_source && piece_mode);
 }

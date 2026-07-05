@@ -22,6 +22,7 @@
   "default_per_piece_basis",
   "column_break_calc",
   "default_overtime_with_salary",
+  "default_payroll_frequency",
   "section_break_source_defaults",
   "overtime_doctype",
   "overtime_employee_field",
@@ -149,6 +150,13 @@
    "fieldname": "default_overtime_with_salary",
    "fieldtype": "Check",
    "label": "Default Overtime with Salary"
+  },
+  {
+   "default": "Monthly",
+   "fieldname": "default_payroll_frequency",
+   "fieldtype": "Select",
+   "label": "Default Payroll Frequency",
+   "options": "Monthly\nBimonthly\nFortnightly\nWeekly\nDaily"
   },
   {
    "fieldname": "section_break_source_defaults",

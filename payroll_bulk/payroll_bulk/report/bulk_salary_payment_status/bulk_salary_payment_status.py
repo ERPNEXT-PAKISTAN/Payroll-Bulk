@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import frappe
 
-from payroll_bulk.payroll_bulk.report.report_utils import pb_in_date_range, pb_money
+from payroll_bulk.payroll_bulk.report.report_utils import pb_in_date_range, pb_money, pb_format_columns
 
 
 def execute(filters=None):
@@ -93,4 +93,4 @@ def execute(filters=None):
 		{"value": total_net, "label": "Total Net", "datatype": "Currency", "currency": frappe.defaults.get_global_default("currency")},
 	]
 
-	return columns, data, None, None, report_summary
+	return pb_format_columns(columns), data, None, None, report_summary

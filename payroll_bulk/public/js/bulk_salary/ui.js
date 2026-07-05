@@ -24,6 +24,7 @@ function bs_default_settings() {
     default_use_hours: 1,
     default_use_qty: 1,
     default_overtime_with_salary: 0,
+    default_payroll_frequency: "Monthly",
     show_department_filter: 1,
     show_branch_filter: 1,
     show_designation_filter: 1,
@@ -349,25 +350,47 @@ async function bs_get_settings() {
 }
 
 function bs_apply_source_defaults(frm, settings) {
+  const is_new = frm.is_new() || !frm.doc.name;
+  const pick = (field, fallback = "") => {
+    if (frm.doc[field]) return;
+    frm.doc[field] = settings[field] ?? fallback;
+  };
+
   frm.doc.company = frm.doc.company || settings.company || frappe.defaults.get_default("company") || "";
-  frm.doc.calculation_mode = frm.doc.calculation_mode || settings.default_calculation_mode || "Manual";
-  frm.doc.manual_salary_basis = frm.doc.manual_salary_basis || settings.default_manual_salary_basis || "Full Month";
+  pick("calculation_mode", settings.default_calculation_mode || "Manual");
+  pick("manual_salary_basis", settings.default_manual_salary_basis || "Full Month");
   frm.doc.attendance_source = bs_get_mode_attendance_source(frm.doc.calculation_mode);
   if (!frm.doc.overtime_source) {
     frm.doc.overtime_source = settings.default_overtime_source || bs_get_default_overtime_source(frm.doc.calculation_mode || "Manual", settings);
   }
-  frm.doc.per_piece_basis = frm.doc.per_piece_basis || settings.default_per_piece_basis || "Total Hours";
-  frm.doc.overtime_doctype = frm.doc.overtime_doctype || settings.overtime_doctype || "";
-  frm.doc.overtime_employee_field = frm.doc.overtime_employee_field || settings.overtime_employee_field || "";
-  frm.doc.overtime_date_field = frm.doc.overtime_date_field || settings.overtime_date_field || "";
-  frm.doc.overtime_hours_field = frm.doc.overtime_hours_field || settings.overtime_hours_field || "";
-  frm.doc.overtime_qty_field = frm.doc.overtime_qty_field || settings.overtime_qty_field || "";
-  frm.doc.overtime_rate_field = frm.doc.overtime_rate_field || settings.overtime_rate_field || "";
+  pick("per_piece_basis", settings.default_per_piece_basis || "Total Hours");
+  pick("payroll_frequency", settings.default_payroll_frequency || "Monthly");
+  pick("overtime_doctype");
+  pick("overtime_employee_field");
+  pick("overtime_date_field");
+  pick("overtime_hours_field");
+  pick("overtime_qty_field");
+  pick("overtime_rate_field");
   frm.doc.use_hours = bs_to_int(frm.doc.use_hours ?? settings.default_use_hours, 1);
   frm.doc.use_qty = bs_to_int(frm.doc.use_qty ?? settings.default_use_qty, 1);
   frm.doc.overtime_with_salary = bs_to_int(frm.doc.overtime_with_salary ?? settings.default_overtime_with_salary, 0);
   Object.assign(frm.doc, bs_normalize_source_values(frm.doc));
-  if (frm.doc.month && (!frm.doc.start_date || !frm.doc.end_date || !bs_period_is_consistent(frm.doc))) {
+
+  if (is_new || !frm.doc.start_date || !frm.doc.end_date) {
+    const today = frappe.datetime.get_today();
+    if (!frm.doc.month) frm.doc.month = bs_month_from_date(today);
+    const period = bs_normalize_period(
+      {
+        month: frm.doc.month,
+        payroll_frequency: frm.doc.payroll_frequency || settings.default_payroll_frequency || "Monthly",
+        start_date: frm.doc.start_date,
+        end_date: frm.doc.end_date,
+        posting_date: frm.doc.posting_date || today,
+      },
+      frm.doc.month ? "month" : "dates",
+    );
+    Object.assign(frm.doc, period);
+  } else if (frm.doc.month && (!frm.doc.start_date || !frm.doc.end_date || !bs_period_is_consistent(frm.doc))) {
     const period = bs_normalize_period(
       {
         month: frm.doc.month,
@@ -445,22 +468,13 @@ function bs_collapse_panel(target) {
 }
 
 function bs_hide_filters() {
-  const $area = $("#bs-filters-area");
-  if (!$area.length) return;
-  $area.addClass("is-hidden");
-  $("#bs-toggle-filters-btn").text("☰ Field Mapping");
+  $("#bs-source-mapping-area").show();
 }
 
 function bs_update_source_mapping_header(frm) {
-  const mode = frm?.doc?.calculation_mode || "Manual";
-  const use_piece = bs_is_piece_mode(mode);
-  const overtime_source = bs_get_active_overtime_source(frm);
-  const show_field_mapping = overtime_source === "Custom DocType" || use_piece;
-  $(".bs-source-mapping-panel").toggleClass("is-hidden", !show_field_mapping);
-  if (!show_field_mapping && !$("#bs-filters-area").hasClass("is-hidden")) {
-    bs_hide_filters();
-  }
-  $("#bs-toggle-filters-btn").toggle(show_field_mapping);
+  $("#bs-source-mapping-area").show();
+  $(".bs-source-mapping-panel").removeClass("is-hidden");
+  $("#bs-toggle-filters-btn").hide();
 }
 
 function bs_normalize_rows() {
@@ -890,16 +904,15 @@ function bs_refresh_source_ui() {
 
   const overtime_source = bs_control_get_value(controls.overtime_source) || frm.doc.overtime_source || "Manual";
   $(".bs-overtime-source-field").toggle(true);
-  const show_custom_map = overtime_source === "Custom DocType" || use_piece;
-  $(".bs-source-map-field").toggle(show_custom_map);
+  $(".bs-source-map-field").toggle(true);
   bs_refresh_overtime_source_options(mode, overtime_source);
   if (use_piece) {
     const piece_flags = bs_piece_basis_flags(bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours");
-    $(".bs-source-hours-field").toggle(show_custom_map && piece_flags.use_hours);
-    $(".bs-source-map-piece").toggle(show_custom_map && piece_flags.use_qty);
+    $(".bs-source-hours-field").toggle(true);
+    $(".bs-source-map-piece").toggle(true);
   } else {
-    $(".bs-source-hours-field").toggle(show_custom_map);
-    $(".bs-source-map-piece").toggle(false);
+    $(".bs-source-hours-field").toggle(true);
+    $(".bs-source-map-piece").toggle(true);
   }
   $(".bs-per-piece-basis-field").toggle(use_piece);
   $("#bs-load-source-btn").toggle(
@@ -1424,9 +1437,8 @@ async function render_main_ui(frm) {
         `}
       </div>
 
-      <div id="bs-filters-area" class="bs-filters-area is-hidden">
-      <div class="bs-filter-card" id="bs-filter-panel">
-        <div class="bs-source-mapping-panel bs-source-section">
+      <div id="bs-source-mapping-area" class="bs-filter-card bs-source-section">
+        <div class="bs-source-mapping-panel">
           <div class="bs-source-mapping-row">
             <div class="bs-row-title bs-row-title-source">Source Mapping</div>
             <div class="bs-source-mapping-fields">
@@ -1456,7 +1468,6 @@ async function render_main_ui(frm) {
           <div class="bs-field-wrap"><label class="bs-label">Other Deduction Component</label><div id="bs-deduction-component-wrap"></div></div>
         </div>
       </div>` : ``}
-      </div>
 
       <!-- Employee table -->
       <div class="bs-section-label" style="display:flex;justify-content:space-between;align-items:center">

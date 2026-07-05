@@ -14,6 +14,9 @@ frappe.query_reports["Bulk Salary Payment Status"] = {
 	],
 	formatter(value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);
+		if (column.fieldtype === "Currency" && data && data[column.fieldname] != null) {
+			return frappe.format(data[column.fieldname], { fieldtype: "Currency", precision: 0 });
+		}
 		if (column.fieldname === "payment_status") {
 			const cls = data.payment_status === "Paid" ? "green" : "orange";
 			return `<span class="indicator-pill ${cls}">${frappe.utils.escape_html(data.payment_status || "")}</span>`;

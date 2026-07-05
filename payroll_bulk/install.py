@@ -163,6 +163,9 @@ def _normalize_payroll_bulk_settings():
 	if not settings.get("default_per_piece_basis"):
 		updates["default_per_piece_basis"] = "Total Hours"
 
+	if not settings.get("default_payroll_frequency"):
+		updates["default_payroll_frequency"] = "Monthly"
+
 	for fieldname in (
 		"show_department_filter",
 		"show_branch_filter",
@@ -395,6 +398,9 @@ PB_REPORTS = [
 	("Bulk Salary Component Reconciliation", "Bulk Salary Creation"),
 	("Bulk Salary Component Detail", "Bulk Salary Creation"),
 	("Bulk Salary Advance Summary", "Bulk Salary Creation"),
+	("Bulk Salary Report", "Salary Slip"),
+	("Bulk Salary Register", "Bulk Salary Creation"),
+	("Employee Salary Slip", "Salary Slip"),
 ]
 
 PB_REPORT_SHORTCUTS = [
@@ -405,6 +411,25 @@ PB_REPORT_SHORTCUTS = [
 	("Component Reconciliation", "Bulk Salary Component Reconciliation", "Bulk Salary Creation", "Pink"),
 	("Component Detail", "Bulk Salary Component Detail", "Bulk Salary Creation", "Purple"),
 	("Advance Summary", "Bulk Salary Advance Summary", "Bulk Salary Creation", "Yellow"),
+	("Salary Report", "Bulk Salary Report", "Salary Slip", "Blue"),
+	("Salary Register", "Bulk Salary Register", "Bulk Salary Creation", "Green"),
+	("Employee Slip", "Employee Salary Slip", "Salary Slip", "Cyan"),
+	("ERP Salary Register", "Salary Register", "Salary Slip", "Grey"),
+]
+
+PB_ERP_LINKS = [
+	("ERP Payroll", "Card Break", None, None),
+	("Salary Slip", "DocType", "Salary Slip", None),
+	("Additional Salary", "DocType", "Additional Salary", None),
+	("Employee", "DocType", "Employee", None),
+	("Journal Entry", "DocType", "Journal Entry", None),
+	("Daily Overtime", "DocType", "Daily Overtime", None),
+	("Salary Component", "DocType", "Salary Component", None),
+	("Salary Structure", "DocType", "Salary Structure", None),
+	("Attendance", "DocType", "Attendance", None),
+	("Employee Checkin", "DocType", "Employee Checkin", None),
+	("Employee Advance", "DocType", "Employee Advance", None),
+	("Salary Register", "Report", "Salary Register", "Salary Slip"),
 ]
 
 
@@ -555,6 +580,38 @@ def _sync_payroll_bulk_workspace(card_names=None, chart_name=None, payment_chart
 			},
 		)
 
+	for label, link_type, link_to, ref_doctype in PB_ERP_LINKS:
+		if link_type == "Card Break":
+			if any(link.label == label and link.type == "Card Break" for link in ws.links):
+				continue
+			ws.append(
+				"links",
+				{
+					"label": label,
+					"link_count": 0,
+					"link_type": "DocType",
+					"type": "Card Break",
+				},
+			)
+			continue
+		key = (link_to, link_type)
+		if key in existing:
+			continue
+		if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
+			continue
+		if link_type == "Report" and not frappe.db.exists("Report", link_to):
+			continue
+		row = {
+			"label": label,
+			"link_to": link_to,
+			"link_type": link_type,
+			"type": "Link",
+		}
+		if link_type == "Report":
+			row["is_query_report"] = 1
+			row["report_ref_doctype"] = ref_doctype
+		ws.append("links", row)
+
 	keep_shortcuts = [row for row in ws.shortcuts if row.type not in ("Report", "Page")]
 	ws.shortcuts = []
 	for row in keep_shortcuts:
@@ -618,6 +675,41 @@ def _sync_payroll_bulk_sidebar():
 				"child": 1,
 				"indent": 0,
 				"open_in_new_tab": 1,
+			},
+		)
+
+	if "ERP Payroll" not in existing:
+		sb.append(
+			"items",
+			{
+				"label": "ERP Payroll",
+				"link_type": "DocType",
+				"type": "Section Break",
+				"child": 0,
+				"indent": 1,
+				"keep_closed": 1,
+			},
+		)
+		existing.add("ERP Payroll")
+
+	for label, link_type, link_to, ref_doctype in PB_ERP_LINKS:
+		if link_type == "Card Break":
+			continue
+		if label in existing:
+			continue
+		if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
+			continue
+		if link_type == "Report" and not frappe.db.exists("Report", link_to):
+			continue
+		sb.append(
+			"items",
+			{
+				"label": label,
+				"link_to": link_to,
+				"link_type": link_type,
+				"type": "Link",
+				"child": 1,
+				"indent": 0,
 			},
 		)
 	sb.save(ignore_permissions=True)

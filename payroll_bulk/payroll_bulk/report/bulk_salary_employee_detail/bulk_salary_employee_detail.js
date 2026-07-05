@@ -18,6 +18,9 @@ frappe.query_reports["Bulk Salary Employee Detail"] = {
 	],
 	formatter(value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);
+		if (column.fieldtype === "Currency" && data && data[column.fieldname] != null) {
+			return frappe.format(data[column.fieldname], { fieldtype: "Currency", precision: 0 });
+		}
 		if (column.fieldname === "status") {
 			const cls = data.status === "Failed" ? "red" : data.status === "Completed" ? "green" : "blue";
 			return `<span class="indicator-pill ${cls}">${frappe.utils.escape_html(data.status || "")}</span>`;

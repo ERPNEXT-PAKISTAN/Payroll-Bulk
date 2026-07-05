@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import frappe
 
-from payroll_bulk.payroll_bulk.report.report_utils import pb_money
+from payroll_bulk.payroll_bulk.report.report_utils import pb_money, pb_format_columns
 
 
 def execute(filters=None):
@@ -70,4 +70,4 @@ def execute(filters=None):
 		{"value": ded_total, "label": "Deductions", "indicator": "Red", "datatype": "Currency"},
 	]
 
-	return columns, data, None, None, report_summary
+	return pb_format_columns(columns), data, None, None, report_summary

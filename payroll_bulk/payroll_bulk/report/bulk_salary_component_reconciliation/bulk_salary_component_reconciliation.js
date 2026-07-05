@@ -16,6 +16,9 @@ frappe.query_reports["Bulk Salary Component Reconciliation"] = {
 	],
 	formatter(value, row, column, data, default_formatter) {
 		value = default_formatter(value, row, column, data);
+		if (column.fieldtype === "Currency" && data && data[column.fieldname] != null) {
+			return frappe.format(data[column.fieldname], { fieldtype: "Currency", precision: 0 });
+		}
 		if (column.fieldname === "match_label") {
 			if (data.match) {
 				return `<span class="indicator-pill green">${__("Matched")}</span>`;

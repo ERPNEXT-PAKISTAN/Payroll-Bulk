@@ -8,6 +8,28 @@ def pb_money(value):
 	return round(flt(value))
 
 
+def pb_col(label, fieldname, fieldtype, width=120, **kwargs):
+	column = {
+		"label": label,
+		"fieldname": fieldname,
+		"fieldtype": fieldtype,
+		"width": width,
+	}
+	if fieldtype == "Currency":
+		column["precision"] = 0
+	column.update(kwargs)
+	return column
+
+
+def pb_format_columns(columns):
+	for column in columns or []:
+		if column.get("fieldtype") == "Currency" and column.get("precision") is None:
+			column["precision"] = 0
+		if not column.get("width"):
+			column["width"] = 120
+	return columns
+
+
 def pb_round_row_amounts(row: dict) -> dict:
 	for field in (
 		"ctc", "ot_amount", "gross_pay", "net_pay", "adv_deduct", "advance_balance",

@@ -4,7 +4,7 @@ import frappe
 from frappe import _
 
 from payroll_bulk.api import get_batch_slip_reconciliation
-from payroll_bulk.payroll_bulk.report.report_utils import pb_money
+from payroll_bulk.payroll_bulk.report.report_utils import pb_money, pb_format_columns
 
 
 def execute(filters=None):
@@ -25,7 +25,7 @@ def execute(filters=None):
 	]
 
 	if not filters.get("batch"):
-		return columns, [], _("Select a batch to reconcile."), None, []
+		return pb_format_columns(columns), [], _("Select a batch to reconcile."), None, []
 
 	result = get_batch_slip_reconciliation(filters.batch)
 	rows = result.get("rows") or []
@@ -92,4 +92,4 @@ def execute(filters=None):
 		else:
 			message = _("Batch {0}: all rows matched.").format(frappe.bold(batch_label))
 
-	return columns, rows, message, chart, report_summary
+	return pb_format_columns(columns), rows, message, chart, report_summary

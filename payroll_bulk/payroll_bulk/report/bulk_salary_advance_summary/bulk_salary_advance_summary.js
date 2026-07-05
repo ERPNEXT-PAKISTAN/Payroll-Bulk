@@ -7,4 +7,11 @@ frappe.query_reports["Bulk Salary Advance Summary"] = {
 		{ fieldname: "to_date", label: __("To Date"), fieldtype: "Date" },
 		{ fieldname: "only_with_advance", label: __("Only With Advance"), fieldtype: "Check", default: 1 },
 	],
+	formatter(value, row, column, data, default_formatter) {
+		value = default_formatter(value, row, column, data);
+		if (column.fieldtype === "Currency" && data && data[column.fieldname] != null) {
+			return frappe.format(data[column.fieldname], { fieldtype: "Currency", precision: 0 });
+		}
+		return value;
+	},
 };
