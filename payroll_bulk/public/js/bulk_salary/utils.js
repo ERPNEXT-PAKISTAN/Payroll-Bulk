@@ -305,8 +305,14 @@ function inject_bs_styles() {
       --bs-shadow:0 10px 30px rgba(15,23,42,.06);
     }
     #bs-main-wrap{margin:0 0 32px;display:block!important;visibility:visible!important;overflow:visible!important}
-    .form-page>.form-section:not(#bs-main-wrap),
-    .form-page>.form-column:not(#bs-main-wrap){display:none!important}
+    /* Hide standard doc fields on Bulk Salary form only — must not affect frappe dialogs */
+    .form-page:has(#bs-main-wrap) > .form-section,
+    .form-page:has(#bs-main-wrap) > .form-column,
+    #bs-main-wrap ~ .form-section,
+    #bs-main-wrap ~ .form-column{display:none!important}
+    .modal-body .form-page > .form-section,
+    .modal-body .form-page > .form-column,
+    .modal-body .form-layout .frappe-control{display:block!important;visibility:visible!important;opacity:1!important}
     .bs-adv-closing{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
     .bs-adv-deduct-chip .bs-adv-input{width:88px;height:24px;padding:2px 8px;border:1px solid var(--bs-border);border-radius:8px;font-size:13px}
     .bs-adv-balance-chip{font-weight:600}
@@ -715,6 +721,7 @@ function inject_bs_styles() {
 
     /* Log */
     .bs-log{background:#fcfdff;border:1px solid var(--bs-border);border-radius:var(--bs-radius);padding:10px 14px;max-height:260px;overflow-y:auto;font-size:12px;font-family:'Consolas','Courier New',monospace;box-shadow:inset 0 1px 0 rgba(255,255,255,.8)}
+
     .bs-log-row{padding:3px 0;border-bottom:1px solid #e2e8f0;line-height:1.5}
     .bs-log-row:last-child{border-bottom:none}
     .bs-log-success{color:var(--bs-green)}.bs-log-error{color:var(--bs-red)}.bs-log-info{color:#93c5fd}

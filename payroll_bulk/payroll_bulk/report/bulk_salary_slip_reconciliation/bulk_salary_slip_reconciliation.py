@@ -48,6 +48,8 @@ def execute(filters=None):
 			row["issue_type"] = "missing_slip"
 		elif row.get("issue") == "Amount mismatch":
 			row["issue_type"] = "mismatch"
+		elif "Empty slip" in (row.get("issue") or "") or "Zero amounts" in (row.get("issue") or ""):
+			row["issue_type"] = "zero_slip"
 		elif "No batch row" in (row.get("issue") or ""):
 			row["issue_type"] = "no_row"
 		else:

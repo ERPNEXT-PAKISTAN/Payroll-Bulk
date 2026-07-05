@@ -136,29 +136,182 @@ function bs_get_saved_components_map(frm) {
   return grouped;
 }
 
-function bs_apply_month_period(frm, month_name) {
-  if (!month_name || !BS_MONTHS.includes(month_name)) return;
-  const current = frm.doc.posting_date || frappe.datetime.get_today();
-  const parts = current.split("-");
-  const year = parseInt(parts[0] || frappe.datetime.get_today().split("-")[0], 10);
+function bs_month_from_date(date_str) {
+  if (!date_str) return "";
+  const month_index = parseInt(String(date_str).split("-")[1] || "0", 10);
+  return BS_MONTHS[month_index - 1] || "";
+}
+
+function bs_period_bounds_for_month(month_name, reference_date) {
+  if (!month_name || !BS_MONTHS.includes(month_name)) {
+    return { month: "", start_date: "", end_date: "" };
+  }
+  const ref = reference_date || frappe.datetime.get_today();
+  const year = parseInt(String(ref).split("-")[0] || frappe.datetime.get_today().split("-")[0], 10);
   const month_index = BS_MONTHS.indexOf(month_name) + 1;
   const mm = String(month_index).padStart(2, "0");
   const start_date = `${year}-${mm}-01`;
   const end_day = new Date(year, month_index, 0).getDate();
   const end_date = `${year}-${mm}-${String(end_day).padStart(2, "0")}`;
-  return bs_set_doc_values(frm, {
-    month: month_name,
-    start_date,
-    end_date,
-    posting_date: end_date,
-    payroll_frequency: "Monthly",
-  }).then(() => {
-    frm.doc.month = month_name;
-    frm.doc.start_date = start_date;
-    frm.doc.end_date = end_date;
-    frm.doc.posting_date = end_date;
+  return { month: month_name, start_date, end_date };
+}
+
+function bs_period_bounds_for_frequency(frequency, posting_date) {
+  const posting = posting_date || frappe.datetime.get_today();
+  const base_date = frappe.datetime.str_to_obj(posting);
+  if (!base_date) {
+    return { start_date: posting, end_date: posting };
+  }
+
+  let start_date = posting;
+  let end_date = posting;
+
+  if (frequency === "Monthly") {
+    start_date = frappe.datetime.month_start(posting);
+    end_date = frappe.datetime.month_end(posting);
+  } else if (frequency === "Weekly") {
+    const day = base_date.getDay();
+    const monday = new Date(base_date);
+    monday.setDate(base_date.getDate() - ((day + 6) % 7));
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    start_date = frappe.datetime.obj_to_str(monday);
+    end_date = frappe.datetime.obj_to_str(sunday);
+  } else if (frequency === "Fortnightly") {
+    start_date = frappe.datetime.month_start(posting);
+    end_date = frappe.datetime.obj_to_str(new Date(base_date.getFullYear(), base_date.getMonth(), 15));
+  } else if (frequency === "Bimonthly") {
+    const is_first_half = base_date.getDate() <= 15;
+    start_date = is_first_half
+      ? frappe.datetime.month_start(posting)
+      : frappe.datetime.obj_to_str(new Date(base_date.getFullYear(), base_date.getMonth(), 16));
+    end_date = is_first_half
+      ? frappe.datetime.obj_to_str(new Date(base_date.getFullYear(), base_date.getMonth(), 15))
+      : frappe.datetime.month_end(posting);
+  }
+
+  return { start_date, end_date };
+}
+
+function bs_period_is_consistent(period) {
+  if (!period?.start_date || !period?.end_date || !period?.posting_date) return false;
+  if (period.start_date > period.end_date) return false;
+  if (period.posting_date < period.start_date || period.posting_date > period.end_date) return false;
+  if (period.month && bs_month_from_date(period.start_date) && bs_month_from_date(period.start_date) !== period.month) {
+    return false;
+  }
+  return true;
+}
+
+function bs_normalize_period(period, trigger = "dates") {
+  const next = {
+    month: period?.month || "",
+    payroll_frequency: period?.payroll_frequency || "Monthly",
+    start_date: period?.start_date || "",
+    end_date: period?.end_date || "",
+    posting_date: period?.posting_date || "",
+  };
+  const ref = next.posting_date || next.end_date || next.start_date || frappe.datetime.get_today();
+
+  if (trigger === "month" && next.month) {
+    const bounds = bs_period_bounds_for_month(next.month, ref);
+    next.month = bounds.month;
+    next.start_date = bounds.start_date;
+    next.end_date = bounds.end_date;
+    next.posting_date = bounds.end_date;
+    next.payroll_frequency = "Monthly";
+    return next;
+  }
+
+  if (trigger === "frequency") {
+    const bounds = bs_period_bounds_for_frequency(next.payroll_frequency, ref);
+    next.start_date = bounds.start_date;
+    next.end_date = bounds.end_date;
+    next.month = bs_month_from_date(next.start_date) || next.month;
+    next.posting_date = next.end_date;
+    return next;
+  }
+
+  if (trigger === "posting") {
+    if (next.payroll_frequency === "Monthly" && next.posting_date) {
+      const month = bs_month_from_date(next.posting_date);
+      const bounds = bs_period_bounds_for_month(month, next.posting_date);
+      next.month = bounds.month;
+      next.start_date = bounds.start_date;
+      next.end_date = bounds.end_date;
+      next.posting_date = bounds.end_date;
+      return next;
+    }
+    const bounds = bs_period_bounds_for_frequency(next.payroll_frequency, next.posting_date || ref);
+    next.start_date = bounds.start_date;
+    next.end_date = bounds.end_date;
+    next.month = bs_month_from_date(next.start_date) || next.month;
+    if (!next.posting_date || next.posting_date < next.start_date || next.posting_date > next.end_date) {
+      next.posting_date = next.end_date;
+    }
+    return next;
+  }
+
+  if (next.start_date && next.end_date && next.start_date > next.end_date) {
+    next.end_date = next.start_date;
+  }
+
+  if (next.payroll_frequency === "Monthly") {
+    const month = next.month || bs_month_from_date(next.start_date || next.end_date || ref);
+    if (month) {
+      const bounds = bs_period_bounds_for_month(month, next.start_date || next.end_date || ref);
+      next.month = bounds.month;
+      next.start_date = bounds.start_date;
+      next.end_date = bounds.end_date;
+      next.posting_date = bounds.end_date;
+      return next;
+    }
+  }
+
+  if (next.start_date) next.month = bs_month_from_date(next.start_date) || next.month;
+  if (!next.posting_date || next.posting_date < next.start_date || next.posting_date > next.end_date) {
+    next.posting_date = next.end_date || next.start_date;
+  }
+  return next;
+}
+
+function bs_apply_month_period(frm, month_name) {
+  if (!month_name || !BS_MONTHS.includes(month_name)) return Promise.resolve();
+  const period = bs_normalize_period(
+    {
+      month: month_name,
+      payroll_frequency: frm.doc.payroll_frequency || "Monthly",
+      start_date: frm.doc.start_date,
+      end_date: frm.doc.end_date,
+      posting_date: frm.doc.posting_date,
+    },
+    "month",
+  );
+  return bs_set_doc_values(frm, period).then(() => {
+    Object.assign(frm.doc, period);
     bs_update_header_period(frm);
   });
+}
+
+async function bs_repair_period_from_doc(frm) {
+  if (!frm?.doc) return;
+  const current = {
+    month: frm.doc.month || "",
+    payroll_frequency: frm.doc.payroll_frequency || "Monthly",
+    start_date: frm.doc.start_date || "",
+    end_date: frm.doc.end_date || "",
+    posting_date: frm.doc.posting_date || "",
+  };
+  if (!current.start_date && !current.end_date && current.month) {
+    await bs_apply_month_period(frm, current.month);
+    return;
+  }
+  if (bs_period_is_consistent(current)) return;
+  const trigger = current.month ? "month" : "dates";
+  const period = bs_normalize_period(current, trigger);
+  await bs_set_doc_values(frm, period);
+  Object.assign(frm.doc, period);
+  bs_update_header_period(frm);
 }
 
 async function bs_get_settings() {
@@ -194,8 +347,18 @@ function bs_apply_source_defaults(frm, settings) {
   frm.doc.use_qty = bs_to_int(frm.doc.use_qty ?? settings.default_use_qty, 1);
   frm.doc.overtime_with_salary = bs_to_int(frm.doc.overtime_with_salary ?? settings.default_overtime_with_salary, 0);
   Object.assign(frm.doc, bs_normalize_source_values(frm.doc));
-  if (frm.doc.month && (!frm.doc.start_date || !frm.doc.end_date)) {
-    bs_apply_month_period(frm, frm.doc.month);
+  if (frm.doc.month && (!frm.doc.start_date || !frm.doc.end_date || !bs_period_is_consistent(frm.doc))) {
+    const period = bs_normalize_period(
+      {
+        month: frm.doc.month,
+        payroll_frequency: frm.doc.payroll_frequency || "Monthly",
+        start_date: frm.doc.start_date,
+        end_date: frm.doc.end_date,
+        posting_date: frm.doc.posting_date,
+      },
+      "month",
+    );
+    Object.assign(frm.doc, period);
   }
 }
 
@@ -304,8 +467,8 @@ function bs_focus_pending_editable() {
   }
 }
 
-async function bs_apply_period_controls(frm) {
-  const period = bs_read_period_from_header();
+async function bs_apply_period_controls(frm, trigger = "dates") {
+  const period = bs_normalize_period(bs_read_period_from_header(), trigger);
   await bs_set_doc_values(frm, period);
   Object.assign(frm.doc, period);
   bs_update_header_period(frm);
@@ -322,13 +485,9 @@ function bs_read_period_from_header() {
   };
 }
 
-function bs_sync_period_from_header(frm) {
-  const period = bs_read_period_from_header();
-  if (period.start_date) frm.doc.start_date = period.start_date;
-  if (period.end_date) frm.doc.end_date = period.end_date;
-  if (period.month) frm.doc.month = period.month;
-  if (period.posting_date) frm.doc.posting_date = period.posting_date;
-  if (period.payroll_frequency) frm.doc.payroll_frequency = period.payroll_frequency;
+function bs_sync_period_from_header(frm, trigger = "dates") {
+  const period = bs_normalize_period(bs_read_period_from_header(), trigger);
+  Object.assign(frm.doc, period);
   return period;
 }
 
@@ -1364,12 +1523,11 @@ async function render_main_ui(frm) {
   });
   $wrap.find("#bs-head-month-select").on("change", async function () {
     const month = $(this).val() || "";
-    if (month) {
-      await bs_apply_month_period(frm, month);
+    if (!month) {
+      await bs_apply_period_controls(frm, "dates");
     } else {
-      await bs_apply_period_controls(frm);
+      await bs_apply_period_controls(frm, "month");
     }
-    bs_sync_period_from_header(frm);
     if (window._bs.rows.length) {
       bs_clear_all_row_source_metrics();
       window._bs.loaded_source_period = "";
@@ -1377,9 +1535,24 @@ async function render_main_ui(frm) {
       await bs_trigger_source_reload({ force: true });
     }
   });
-  $wrap.find("#bs-head-frequency, #bs-head-start-date, #bs-head-end-date, #bs-head-posting-date").on("change", async function () {
-    await bs_apply_period_controls(frm);
-    bs_sync_period_from_header(frm);
+  $wrap.find("#bs-head-frequency").on("change", async function () {
+    await bs_apply_period_controls(frm, "frequency");
+    if (window._bs.rows.length) {
+      bs_clear_all_row_source_metrics();
+      window._bs.loaded_source_period = "";
+      await bs_trigger_source_reload({ force: true });
+    }
+  });
+  $wrap.find("#bs-head-start-date, #bs-head-end-date").on("change", async function () {
+    await bs_apply_period_controls(frm, "dates");
+    if (window._bs.rows.length) {
+      bs_clear_all_row_source_metrics();
+      window._bs.loaded_source_period = "";
+      await bs_trigger_source_reload({ force: true });
+    }
+  });
+  $wrap.find("#bs-head-posting-date").on("change", async function () {
+    await bs_apply_period_controls(frm, "posting");
     if (window._bs.rows.length) {
       bs_clear_all_row_source_metrics();
       window._bs.loaded_source_period = "";
@@ -1399,6 +1572,7 @@ async function render_main_ui(frm) {
 
   await bs_bind_source_controls(frm, settings, $wrap);
   await bs_restore_source_controls_from_doc(frm);
+  await bs_repair_period_from_doc(frm);
   bs_update_header_period(frm);
   $(document).off("mousedown.bsfilters").on("mousedown.bsfilters", function (e) {
     const $target = $(e.target);
@@ -2326,8 +2500,12 @@ window.bs_reprocess_row = async (id, submit_slip = 0) => {
         await bs_refresh_row_status(id, { silent: true });
         bs_sync_to_frm(frm);
         await new Promise((res, rej) => frm.save("Save", (r) => (r.exc ? rej(new Error(r.exc)) : res(r))));
-        bs_render_table();
-        bs_render_live_summary(frm);
+        if (typeof bs_show_batch_report_view === "function") {
+          await bs_show_batch_report_view(frm);
+        } else {
+          bs_render_table();
+          bs_render_live_summary(frm);
+        }
         frappe.show_alert({ message: `Salary Slip ${slip.name || ""} recreated.`, indicator: "green" }, 5);
       } catch (error) {
         frappe.msgprint({ title: "Reprocess Error", message: error.message || String(error), indicator: "red" });
@@ -2619,11 +2797,15 @@ async function bs_sync_batch_from_slips(frm, options = {}) {
   if (!frm?.doc?.name) return false;
   try {
     const res = await bs_call("payroll_bulk.api.sync_bulk_batch_slip_status", { batch_name: frm.doc.name });
-    const updated = (res.message?.updated_count || 0) > 0;
-    if (updated && !options.skip_reload) {
+    const payload = res.message || res || {};
+    const updated = (payload.updated_count || 0) > 0;
+    const status_changed = payload.processing_status && payload.processing_status !== frm.doc.processing_status;
+    if ((updated || status_changed) && !options.skip_reload) {
       await frm.reload_doc();
+    } else if (status_changed) {
+      frm.doc.processing_status = payload.processing_status;
     }
-    return updated;
+    return updated || status_changed;
   } catch (error) {
     console.warn("Batch slip status sync failed:", error);
     return false;
@@ -3069,6 +3251,56 @@ async function bs_load_source_data(options = {}) {
 }
 
 // ─── 17. SUBMITTED READ-ONLY VIEW ─────────────────────────────────────────────
+async function bs_show_batch_report_view(frm) {
+  if (!frm?.doc?.name) return;
+  window._bs = window._bs || {};
+  window._bs.frm = frm;
+  window._bs._completed_view_batch = null;
+  window._bs._sync_in_flight = null;
+  try {
+    await frm.reload_doc();
+  } catch (error) {
+    console.warn("Batch report reload failed:", error);
+  }
+  render_submitted_view(frm);
+}
+window.bs_show_batch_report_view = bs_show_batch_report_view;
+
+async function bs_return_to_edit_mode(frm) {
+  frm = frm || window._bs?.frm || (typeof cur_frm !== "undefined" ? cur_frm : null);
+  if (!frm?.doc?.name || frm.doc.docstatus === 1) {
+    frappe.show_alert({ message: "Submitted batches cannot be edited here.", indicator: "orange" }, 4);
+    return;
+  }
+  window._bs = window._bs || {};
+  window._bs._force_edit_mode = true;
+  window._bs._completed_view_batch = null;
+  window._bs._sync_in_flight = null;
+  window._bs.frm = frm;
+  frm.doc.processing_status = "Partially Processed";
+  frappe.dom.freeze("Opening edit mode…");
+  try {
+    frappe.call({
+      method: "frappe.client.set_value",
+      args: {
+        doctype: "Bulk Salary Creation",
+        name: frm.doc.name,
+        fieldname: "processing_status",
+        value: "Partially Processed",
+      },
+      freeze: false,
+      async: true,
+    });
+    await bs_bootstrap_main_ui(frm);
+    frappe.show_alert({ message: "Edit mode — fix dates, reload source, then recreate draft slips.", indicator: "blue" }, 5);
+  } catch (error) {
+    frappe.msgprint({ title: "Could not open edit mode", message: error.message || String(error), indicator: "red" });
+  } finally {
+    frappe.dom.unfreeze();
+  }
+}
+window.bs_return_to_edit_mode = bs_return_to_edit_mode;
+
 function render_submitted_view(frm) {
   window._bs.frm = frm;
   const $body = frm.layout.wrapper.find(".form-page");
@@ -3085,14 +3317,20 @@ function render_submitted_view(frm) {
   window._bs._sync_in_flight = batch_name;
 
   bs_sync_batch_from_slips(frm, { skip_reload: true })
-    .then(async (updated) => {
-      if (updated) {
-        await frm.reload_doc();
+    .then(async () => {
+      if (!bs_should_show_report_view(frm.doc)) {
+        window._bs._completed_view_batch = null;
+        await bs_bootstrap_main_ui(frm);
+        return;
       }
       window._bs._completed_view_batch = batch_name;
       render_submitted_view_content(frm, $body);
     })
-    .catch(() => {
+    .catch(async () => {
+      if (!bs_should_show_report_view(frm.doc)) {
+        await bs_bootstrap_main_ui(frm);
+        return;
+      }
       render_submitted_view_content(frm, $body);
     })
     .finally(() => {
@@ -3116,6 +3354,20 @@ async function bs_build_reconcile_panel_html(frm) {
   const summary = data.summary || {};
   const issues = (data.rows || []).filter((r) => !r.match);
   const show_rows = issues.length ? issues : (data.rows || []).slice(0, 8);
+  const mismatch_count = summary.mismatched || 0;
+  const zero_count = summary.zero_slip || 0;
+  const all_matched = mismatch_count === 0 && summary.matched === summary.total && summary.total > 0;
+  const mismatch_notice = mismatch_count
+    ? `<div class="bs-notice bs-notice-warn" style="margin-bottom:10px">
+        <b>${mismatch_count} issue(s)</b>${zero_count ? ` including ${zero_count} empty/zero slip(s)` : ""}.
+        Do not submit drafts yet.
+        Click <b>Edit Batch</b> → Load Source → recreate draft slips with <b>Cancel and Recreate</b>.
+      </div>`
+    : all_matched
+      ? `<div class="bs-notice bs-notice-success" style="margin-bottom:10px">
+          All ${summary.matched} slip(s) match expected batch amounts. You can submit drafts when ready.
+        </div>`
+      : "";
 
   const trs = show_rows.map((r) => `
     <tr class="${r.match ? "bs-reconcile-row-ok" : "bs-reconcile-row-bad"}">
@@ -3138,15 +3390,17 @@ async function bs_build_reconcile_panel_html(frm) {
         <div class="bs-reconcile-kpis">
           <span class="bs-reconcile-kpi bs-reconcile-kpi-ok">Matched ${summary.matched || 0}</span>
           <span class="bs-reconcile-kpi bs-reconcile-kpi-bad">Mismatch ${summary.mismatched || 0}</span>
+          ${zero_count ? `<span class="bs-reconcile-kpi bs-reconcile-kpi-bad">Zero ${zero_count}</span>` : ""}
           <span class="bs-reconcile-kpi bs-reconcile-kpi-warn">Missing ${summary.missing_slip || 0}</span>
           ${summary.no_row ? `<span class="bs-reconcile-kpi bs-reconcile-kpi-warn">Orphan ${summary.no_row}</span>` : ""}
         </div>
       </div>
+      ${mismatch_notice}
       <div class="bs-table-scroll" style="max-height:240px">
         <table class="bs-reconcile-table">
           <thead><tr>
-            <th>Employee</th><th>Slip</th><th>Batch Gross</th><th>Slip Gross</th><th>Diff</th>
-            <th>Batch Net</th><th>Slip Net</th><th>Diff</th><th>Status</th>
+            <th>Employee</th><th>Slip</th><th>Expected Gross</th><th>Slip Gross</th><th>Diff</th>
+            <th>Expected Net</th><th>Slip Net</th><th>Diff</th><th>Status</th>
           </tr></thead>
           <tbody>${trs || `<tr><td colspan="9" style="text-align:center;color:var(--bs-muted)">No rows to compare</td></tr>`}</tbody>
         </table>
@@ -3168,6 +3422,7 @@ async function render_submitted_view_content(frm, $body) {
   const draft_count = rows.filter((r) => r.salary_slip && r.salary_slip_status === "Draft").length;
   const unpaid_count = rows.filter((r) => r.salary_slip_status === "Submitted" && !r.payment_entry).length;
   const paid_count = rows.filter((r) => r.payment_entry).length;
+  const report_status = frm.doc.processing_status || (draft_count ? "Draft Slips Created" : "Completed");
 
   let summary = { columns: [], totals: {}, remark: "", payment_journals: [] };
   try {
@@ -3289,17 +3544,20 @@ async function render_submitted_view_content(frm, $body) {
       <div class="bs-header-card">
         <div class="bs-header-icon" style="background:linear-gradient(135deg,#166534,#14532d)">✓</div>
         <div style="flex:1">
-          <div class="bs-header-title">Bulk Salary — ${frm.doc.processing_status || "Completed"}</div>
+          <div class="bs-header-title">Bulk Salary — ${report_status}</div>
           <div class="bs-header-sub">
             ${frm.doc.company || "—"} · ${frm.doc.start_date || "—"} → ${frm.doc.end_date || "—"} · ${frm.doc.payroll_frequency || "—"}
+            ${frm.doc.posting_date ? ` · Posting ${frm.doc.posting_date}` : ""}
           </div>
           <div class="bs-pipeline">${pipeline_html}</div>
         </div>
+        ${frm.doc.docstatus === 0 ? `<button type="button" class="bs-btn-secondary" onclick="bs_return_to_edit_mode()">✎ Edit Batch</button>` : ""}
       </div>
       ${kpi_html}
       ${reconcile_html}
       ${accounting_rows.length ? `<div class="bs-accounting-panel"><div class="bs-accounting-title">Accounting</div>${accounting_rows.join("")}</div>` : ""}
       <div class="bs-footer-row bs-mb">
+        ${frm.doc.docstatus === 0 ? `<button type="button" class="bs-btn-secondary" onclick="bs_return_to_edit_mode()">✎ Edit Batch</button>` : ""}
         ${draft_count ? `<button type="button" class="bs-btn-primary" onclick="bs_submit_saved_drafts()">Submit ${draft_count} Draft${draft_count > 1 ? "s" : ""}</button>` : ""}
         ${unpaid_count ? `<button type="button" class="bs-btn-primary" onclick="bs_create_bulk_payment_completed()">Pay All (${unpaid_count})</button>` : ""}
         ${!frm.doc.accrual_journal_entry ? `<button type="button" class="bs-btn-secondary" onclick="bs_create_accrual_journal_entry()">Create Accrual JE</button>` : ""}

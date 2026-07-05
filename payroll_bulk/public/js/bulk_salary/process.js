@@ -157,7 +157,9 @@ function bs_update_parent_summary(frm) {
   else if (cancelled === rows.length) frm.doc.processing_status = "Cancelled";
   else if (failed && success) frm.doc.processing_status = "Completed With Errors";
   else if (failed) frm.doc.processing_status = "Partially Processed";
-  else if (submitted || success) frm.doc.processing_status = "Completed";
+  else if (rows.some((r) => r.salary_slip && (r.salary_slip_status || "") === "Draft")) {
+    frm.doc.processing_status = "Partially Processed";
+  } else if (submitted || success) frm.doc.processing_status = "Completed";
   else frm.doc.processing_status = "Ready";
 }
 
@@ -268,12 +270,14 @@ function open_payroll_dialog(config = {}) {
 
   const d = new frappe.ui.Dialog({
     title: "Create Draft Salary Slips",
-    size:  "small",
+    size:  "large",
     fields: [
       { fieldtype:"HTML", fieldname:"info",
         options:`<div class="bs-notice bs-notice-info" style="margin-bottom:12px">
           Creating slips for <b>${window._bs.rows.length}</b> employee(s).<br>
-          Total estimated net: <b>${fmt_num(window._bs.rows.reduce((s,r)=>s+r.net,0))}</b>
+          Total estimated net: <b>${fmt_num(window._bs.rows.reduce((s,r)=>s+r.net,0))}</b><br>
+          Period: <b>${current_start_date || "—"}</b> → <b>${current_end_date || "—"}</b>
+          ${current_posting_date ? ` · Posting <b>${current_posting_date}</b>` : ""}
         </div>` },
       { fieldtype:"Link", fieldname:"company", options:"Company",
         label:"Company", reqd:1, default:company },
@@ -286,7 +290,9 @@ function open_payroll_dialog(config = {}) {
       { fieldtype:"Date", fieldname:"posting_date", label:"Posting Date",
         reqd:1, default: current_posting_date },
       { fieldtype:"Check", fieldname:"replace_existing_slips",
-        label:"Cancel and Recreate Existing Slips", default: 0 },
+        label:"Cancel and Recreate Existing Slips",
+        description:"Tick this when draft slips already exist or amounts were wrong.",
+        default: (frm.doc.employees || []).some((r) => r.salary_slip) ? 1 : 0 },
       { fieldtype:"Check", fieldname:"create_missing_only",
         label:"Create Missing Slips Only", default: config.create_missing_only ? 1 : 0 },
     ],
@@ -343,21 +349,28 @@ function open_payroll_dialog(config = {}) {
     d.set_value("end_date", end_date);
   };
 
-  d.fields_dict.payroll_frequency.$input.on("change", set_dialog_period);
-  d.fields_dict.posting_date.$input.on("change", () => {
-    if (!d.get_value("start_date") || !d.get_value("end_date")) {
-      set_dialog_period();
-      return;
-    }
-    const freq = d.get_value("payroll_frequency");
-    if (["Monthly", "Bimonthly", "Fortnightly", "Weekly", "Daily"].includes(freq)) {
-      set_dialog_period();
-    }
-  });
   d.show();
-  if (!(current_start_date && current_end_date)) {
-    setTimeout(set_dialog_period, 200);
-  }
+  setTimeout(() => {
+    try {
+      d.fields_dict.payroll_frequency?.$input?.on("change", set_dialog_period);
+      d.fields_dict.posting_date?.$input?.on("change", () => {
+        if (!d.get_value("start_date") || !d.get_value("end_date")) {
+          set_dialog_period();
+          return;
+        }
+        const freq = d.get_value("payroll_frequency");
+        if (["Monthly", "Bimonthly", "Fortnightly", "Weekly", "Daily"].includes(freq)) {
+          set_dialog_period();
+        }
+      });
+      if (!(current_start_date && current_end_date)) {
+        set_dialog_period();
+      }
+      d.$wrapper.find(".modal-body").css({ "min-height": "220px", overflow: "visible" });
+    } catch (error) {
+      console.warn("Payroll dialog setup failed:", error);
+    }
+  }, 100);
 }
 
 
@@ -457,7 +470,6 @@ async function bs_delete_generated_additional_salaries(employee, payroll_date, b
     doctype: "Additional Salary",
     filters: {
       employee,
-      payroll_date,
       ref_doctype: "Bulk Salary Creation",
       ref_docname: batch_name,
       docstatus: ["<", 2],
@@ -468,10 +480,10 @@ async function bs_delete_generated_additional_salaries(employee, payroll_date, b
 
   for (const row of (res.message || [])) {
     if (row.docstatus === 1) {
-      const full = await bs_call("frappe.client.get", { doctype: "Additional Salary", name: row.name });
-      await bs_call("frappe.client.cancel", { doc: full.message });
+      await bs_call("frappe.client.cancel", { doctype: "Additional Salary", name: row.name });
+    } else if (row.docstatus === 0) {
+      await bs_call("frappe.client.delete", { doctype: "Additional Salary", name: row.name });
     }
-    await bs_call("frappe.client.delete", { doctype: "Additional Salary", name: row.name });
   }
 }
 
@@ -688,7 +700,7 @@ async function process_bulk_in_background(frm, vals, rows, log, set_prog) {
   set_prog(rows.length);
   log("Background processing complete ✓", "success");
   window._bs.results = results;
-  show_summary(frm, results, vals);
+  await bs_show_batch_report_view(frm);
 }
 
 // ─── 11. PROCESS ──────────────────────────────────────────────────────────────
@@ -748,6 +760,39 @@ async function process_bulk(frm, vals) {
   } catch (e) {
     log(`Parent save failed: ${e.message || e}`, "error");
     frappe.msgprint({ title: "Save Error", message: e.message || String(e), indicator: "red" });
+    return;
+  }
+
+  log("Loading attendance / source data…");
+  try {
+    const source_res = await bs_call("payroll_bulk.api.ensure_bulk_batch_source_data", {
+      batch_name: frm.doc.name,
+      start_date: vals.start_date,
+      end_date: vals.end_date,
+    });
+    const source_rows = source_res.message?.rows || source_res.rows || [];
+    await frm.reload_doc();
+    bs_sync_row_names_from_doc(frm);
+    if (typeof bs_merge_saved_rows_from_frm === "function") {
+      bs_merge_saved_rows_from_frm(frm);
+    }
+    if (typeof bs_apply_source_metrics_from_doc === "function") {
+      bs_apply_source_metrics_from_doc(frm);
+    }
+    (window._bs.rows || []).forEach((row) => {
+      const item = source_rows.find((r) => r.employee === row.employee) || {};
+      if (item.payment_days != null) row.payment_days = parseFloat(item.payment_days || 0);
+      if (item.attendance_days != null) row.attendance_days = parseFloat(item.attendance_days || 0);
+      if (item.absent_days != null) row.absent_days = parseFloat(item.absent_days || 0);
+      if (item.ot_amount != null) row.ot_amount = parseFloat(item.ot_amount || 0);
+      recalc_row(row);
+    });
+    bs_sync_to_frm(frm);
+    await new Promise((res, rej) => frm.save("Save", (r) => (r.exc ? rej(new Error(r.exc)) : res(r))));
+    log("Source data loaded ✓", "success");
+  } catch (e) {
+    log(`Source load failed: ${e.message || e}`, "error");
+    frappe.msgprint({ title: "Source Data Required", message: e.message || String(e), indicator: "red" });
     return;
   }
 
@@ -833,7 +878,6 @@ async function process_bulk(frm, vals) {
       row.structure_warning = row.payroll_payable_account
         ? ""
         : `Payroll Payable Account missing on ${row.salary_structure_assignment || "Salary Structure Assignment"}`;
-      await bs_prepare_salary_inputs(row, vals, frm.doc.name);
 
       const created = await bs_call("payroll_bulk.api.create_bulk_salary_slip", {
         batch_name: frm.doc.name,
@@ -949,7 +993,7 @@ async function process_bulk(frm, vals) {
   }
 
   window._bs.results = results;
-  show_summary(frm, results, vals);
+  await bs_show_batch_report_view(frm);
 }
 
 // ─── 12. SUMMARY ──────────────────────────────────────────────────────────────

@@ -79,6 +79,8 @@ def _update_batch_summary(batch_name: str):
 		processing_status = "Completed With Errors"
 	elif failed_count:
 		processing_status = "Partially Processed"
+	elif any(row.salary_slip_status == "Draft" for row in rows):
+		processing_status = "Partially Processed"
 	elif submitted_count or success_count:
 		processing_status = "Completed"
 	else:

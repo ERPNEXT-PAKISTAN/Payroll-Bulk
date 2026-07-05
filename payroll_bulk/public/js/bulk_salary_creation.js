@@ -32,6 +32,18 @@ function bs_is_completed_batch(doc) {
   return BS_COMPLETED_STATUSES.includes(doc?.processing_status || "");
 }
 
+function bs_has_linked_slips(doc) {
+  return (doc?.employees || []).some((row) => row.salary_slip);
+}
+
+function bs_should_show_report_view(doc) {
+  if (!doc) return false;
+  if (doc.docstatus === 1) return true;
+  if (bs_is_completed_batch(doc)) return true;
+  return bs_has_linked_slips(doc);
+}
+window.bs_should_show_report_view = bs_should_show_report_view;
+
 const BS_BACKGROUND_ROW_THRESHOLD = 20;
 window.BS_BACKGROUND_ROW_THRESHOLD = BS_BACKGROUND_ROW_THRESHOLD;
 
@@ -62,8 +74,14 @@ frappe.ui.form.on("Bulk Salary Creation", {
       inject_bs_styles();
       bs_hide_standard_form_fields(frm);
       frm.fields_dict.employees && frm.fields_dict.employees.$wrapper.hide();
+      if (window._bs?._force_edit_mode && frm.doc.docstatus === 0) {
+        window._bs._force_edit_mode = false;
+        window._bs.frm = frm;
+        bs_bootstrap_main_ui(frm);
+        return;
+      }
       const was_same_batch = window._bs?.frm?.doc?.name === frm.doc.name && (window._bs?.rows || []).length;
-      if (was_same_batch && frm.doc.docstatus === 0 && !bs_is_completed_batch(frm.doc)) {
+      if (was_same_batch && frm.doc.docstatus === 0 && !bs_should_show_report_view(frm.doc)) {
         window._bs.frm = frm;
         bs_sync_period_from_header(frm);
         bs_merge_saved_rows_from_frm(frm);
@@ -82,7 +100,7 @@ frappe.ui.form.on("Bulk Salary Creation", {
         }
         return;
       }
-      if (frm.doc.docstatus === 1 || bs_is_completed_batch(frm.doc)) {
+      if (frm.doc.docstatus === 1 || bs_should_show_report_view(frm.doc)) {
         render_submitted_view(frm);
       } else {
         bs_bootstrap_main_ui(frm);
