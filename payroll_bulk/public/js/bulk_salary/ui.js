@@ -586,8 +586,13 @@ function bs_get_days_attendance_source(frm) {
 }
 
 function bs_should_merge_saved_source_metrics(frm) {
+  if (bs_get_active_overtime_source(frm) === "Manual") return true;
   if (bs_is_source_driven_mode(frm)) return false;
   return true;
+}
+
+function bs_should_restore_saved_ot(frm) {
+  return bs_get_active_overtime_source(frm) === "Manual";
 }
 
 function bs_clear_row_days(row) {
@@ -601,6 +606,11 @@ function bs_clear_row_overtime_fields(row) {
   row.ot_input = 0;
   row.ot_amount = 0;
   row.overtime_hours = 0;
+  row.worked_hours = 0;
+  row.shift_hours = 0;
+}
+
+function bs_clear_row_imported_overtime_hours(row) {
   row.worked_hours = 0;
   row.shift_hours = 0;
 }
@@ -680,6 +690,7 @@ function bs_apply_source_metrics_from_doc(frm) {
     row.shift_hours = parseFloat(saved.shift_hours || 0);
     row.overtime_hours = parseFloat(saved.overtime_hours || 0);
     row.ot_input = parseFloat(saved.ot_input || 0);
+    row.ot_amount = parseFloat(saved.ot_amount || 0);
     recalc_row(row);
   });
   window._bs.loaded_source_period = bs_period_key(frm.doc.start_date, frm.doc.end_date);
@@ -688,21 +699,24 @@ window.bs_apply_source_metrics_from_doc = bs_apply_source_metrics_from_doc;
 
 function bs_merge_saved_rows_from_frm(frm) {
   if (!frm?.doc?.employees?.length || !window._bs?.rows?.length) return;
-  const merge_source_metrics = bs_should_merge_saved_source_metrics(frm);
+  const merge_all = bs_should_merge_saved_source_metrics(frm);
+  const merge_ot_only = !merge_all && bs_should_restore_saved_ot(frm);
   const saved_map = Object.fromEntries(
     frm.doc.employees.filter((row) => row.employee).map((row) => [row.employee, row]),
   );
   window._bs.rows.forEach((row) => {
     const saved = saved_map[row.employee];
     if (!saved) return;
-    if (merge_source_metrics) {
-      row.payment_days = parseFloat(saved.payment_days ?? row.payment_days ?? 0);
-      row.attendance_days = parseFloat(saved.attendance_days ?? row.attendance_days ?? 0);
-      row.absent_days = parseFloat(saved.absent_days ?? row.absent_days ?? 0);
-      row.attendance_hours = parseFloat(saved.attendance_hours ?? row.attendance_hours ?? 0);
+    if (merge_all || merge_ot_only) {
+      if (merge_all) {
+        row.payment_days = parseFloat(saved.payment_days ?? row.payment_days ?? 0);
+        row.attendance_days = parseFloat(saved.attendance_days ?? row.attendance_days ?? 0);
+        row.absent_days = parseFloat(saved.absent_days ?? row.absent_days ?? 0);
+        row.attendance_hours = parseFloat(saved.attendance_hours ?? row.attendance_hours ?? 0);
+        row.worked_hours = parseFloat(saved.worked_hours ?? row.worked_hours ?? 0);
+        row.shift_hours = parseFloat(saved.shift_hours ?? row.shift_hours ?? 0);
+      }
       row.overtime_hours = parseFloat(saved.overtime_hours ?? row.overtime_hours ?? 0);
-      row.worked_hours = parseFloat(saved.worked_hours ?? row.worked_hours ?? 0);
-      row.shift_hours = parseFloat(saved.shift_hours ?? row.shift_hours ?? 0);
       row.ot_input = parseFloat(saved.ot_input ?? row.ot_input ?? 0);
       row.ot_amount = parseFloat(saved.ot_amount ?? row.ot_amount ?? 0);
     }
@@ -724,6 +738,9 @@ function bs_apply_overtime_source_to_rows(frm) {
   const overtime_source = bs_get_active_overtime_source(frm);
   (window._bs.rows || []).forEach((row) => {
     if (overtime_source === "Manual") {
+      // Manual OT is user-entered — never wipe ot_input / ot_amount on reload or save.
+      bs_clear_row_imported_overtime_hours(row);
+    } else {
       bs_clear_row_overtime_fields(row);
     }
     recalc_row(row);
@@ -744,7 +761,7 @@ async function bs_trigger_source_reload(options = {}) {
   const load_piece = (force || scope === "all" || scope === "piece") && bs_needs_piece_salary_load(frm);
 
   if (bs_get_active_overtime_source(frm) === "Manual" && (force || scope === "all" || scope === "overtime")) {
-    bs_apply_overtime_source_to_rows(frm);
+    (window._bs.rows || []).forEach((row) => bs_clear_row_imported_overtime_hours(row));
   }
 
   if (!load_days && !load_ot && !load_piece) {
@@ -754,7 +771,9 @@ async function bs_trigger_source_reload(options = {}) {
   }
 
   if (force && scope === "all") {
-    bs_clear_all_row_source_metrics();
+    bs_clear_all_row_days();
+    if (load_ot) bs_clear_all_row_overtime();
+    if (load_piece) bs_clear_all_row_piece_salary();
   } else if (force && scope === "days") {
     bs_clear_all_row_days();
   } else if (force && scope === "overtime") {
@@ -1156,7 +1175,8 @@ async function render_main_ui(frm) {
   const show_manual_employee = !!(settings.enable_manual_add && bs_to_int(settings.show_employee_filter, 1));
   const show_filter_row = true;
 
-  const source_driven = bs_is_source_driven_mode(frm);
+  const source_driven_days = bs_needs_days_load(frm) || bs_needs_piece_salary_load(frm);
+  const source_driven_ot = bs_needs_overtime_load(frm);
 
   // Restore from saved draft
   if (frm.doc.employees && frm.doc.employees.length) {
@@ -1171,8 +1191,8 @@ async function render_main_ui(frm) {
         designation:    r.designation   || "",
         ctc:            parseFloat(r.ctc || 0),
         ot_type:        "hours",
-        ot_input:       source_driven ? 0 : parseFloat(r.ot_input || 0),
-        ot_amount:      source_driven ? 0 : parseFloat(r.ot_amount || 0),
+        ot_input:       source_driven_ot ? 0 : parseFloat(r.ot_input || 0),
+        ot_amount:      source_driven_ot ? 0 : parseFloat(r.ot_amount || 0),
         bonus_amount:   parseFloat(r.bonus_amount || 0),
         other_allowance:parseFloat(r.other_allowance || 0),
         source_hours:   parseFloat(r.source_hours || 0),
@@ -1182,13 +1202,13 @@ async function render_main_ui(frm) {
         use_qty:        ("use_qty" in r) ? parseInt(r.use_qty || 0, 10) : 1,
         overtime_with_salary: ("overtime_with_salary" in frm.doc) ? parseInt(frm.doc.overtime_with_salary || 0, 10) : bs_to_int(settings.default_overtime_with_salary, 0),
         source_row_names: [],
-        attendance_days: source_driven ? 0 : parseFloat(r.attendance_days || 0),
-        absent_days:    source_driven ? 0 : parseFloat(r.absent_days || 0),
-        attendance_hours: source_driven ? 0 : parseFloat(r.attendance_hours || 0),
-        payment_days:   source_driven ? 0 : (parseFloat(r.payment_days || 0) || (frm.doc.calculation_mode === "Manual" ? 30 : 0)),
-        worked_hours:   source_driven ? 0 : parseFloat(r.worked_hours || 0),
-        shift_hours:    source_driven ? 0 : parseFloat(r.shift_hours || 0),
-        overtime_hours: source_driven ? 0 : parseFloat(r.overtime_hours || 0),
+        attendance_days: source_driven_days ? 0 : parseFloat(r.attendance_days || 0),
+        absent_days:    source_driven_days ? 0 : parseFloat(r.absent_days || 0),
+        attendance_hours: source_driven_days ? 0 : parseFloat(r.attendance_hours || 0),
+        payment_days:   source_driven_days ? 0 : (parseFloat(r.payment_days || 0) || (frm.doc.calculation_mode === "Manual" ? 30 : 0)),
+        worked_hours:   source_driven_ot ? 0 : parseFloat(r.worked_hours || 0),
+        shift_hours:    source_driven_ot ? 0 : parseFloat(r.shift_hours || 0),
+        overtime_hours: source_driven_ot ? 0 : parseFloat(r.overtime_hours || 0),
         gross:          parseFloat(r.gross_pay || r.gross || 0),
         advances:       [],
         advance_balance:parseFloat(r.advance_balance || 0),
@@ -1644,12 +1664,7 @@ async function render_main_ui(frm) {
   const finish_init = async () => {
     bs_merge_saved_rows_from_frm(frm);
     await bs_restore_source_controls_from_doc(frm);
-    const saved_ot_source = bs_get_active_overtime_source(frm);
-    if (saved_ot_source === "Manual") {
-      bs_apply_overtime_source_to_rows(frm);
-    } else {
-      window._bs.rows.forEach(recalc_row);
-    }
+    window._bs.rows.forEach(recalc_row);
     bs_render_table();
     bs_render_live_summary(frm);
     if (typeof bs_tidy_form_after_ui === "function") bs_tidy_form_after_ui(frm);
@@ -2644,6 +2659,7 @@ window.bs_update_ot = (id, val) => {
   const row = window._bs.rows.find((r) => r._id === id);
   if (!row) return;
   row.ot_input = parseFloat(val) || 0;
+  row.overtime_hours = row.ot_input;
   recalc_row(row);
   bs_render_table();
 };
@@ -2751,14 +2767,20 @@ window.bs_create_accrual_journal_entry = async () => {
       batch_name: frm.doc.name,
     });
     const journal_entry = res.message?.journal_entry || res.journal_entry || res.message;
+    const linked = res.message?.linked || res.linked;
     if (!journal_entry) {
       pw.fail("Accrual processed but no Journal Entry was returned.", "Close");
       return;
     }
-    pw.log(`Journal Entry <b>${journal_entry}</b> created ✓`, "success");
+    pw.log(
+      linked
+        ? `Linked existing Journal Entry <b>${journal_entry}</b> to this batch ✓`
+        : `Journal Entry <b>${journal_entry}</b> created ✓`,
+      "success",
+    );
     pw.complete({
       indicator: "success",
-      html: `<div class="bs-notice bs-notice-info">Accrual Journal Entry <b>${journal_entry}</b> is ready.</div>`,
+      html: `<div class="bs-notice bs-notice-info">Accrual Journal Entry <b>${journal_entry}</b> is ${linked ? "linked" : "ready"}.</div>`,
       button_label: "Done",
     });
     pw.on_done(async () => {

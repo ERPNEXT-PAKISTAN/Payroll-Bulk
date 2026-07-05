@@ -266,6 +266,8 @@ function open_payroll_dialog(config = {}) {
   const batch_end = frm.doc.end_date || "";
   const batch_posting = frm.doc.posting_date || batch_end || batch_start || "";
   const batch_frequency = frm.doc.payroll_frequency || "Monthly";
+  const has_existing_slips = (frm.doc.employees || []).some((r) => r.salary_slip);
+  const has_submitted_slips = (frm.doc.employees || []).some((r) => r.salary_slip_status === "Submitted");
 
   const d = new frappe.ui.Dialog({
     title: "Create Draft Salary Slips",
@@ -273,18 +275,19 @@ function open_payroll_dialog(config = {}) {
     fields: [
       { fieldtype:"HTML", fieldname:"info",
         options:`<div class="bs-notice bs-notice-info" style="margin-bottom:12px">
-          Creating slips for <b>${window._bs.rows.length}</b> employee(s).<br>
-          Total estimated net: <b>${fmt_num(window._bs.rows.reduce((s,r)=>s+r.net,0))}</b><br>
+          Creates <b>draft</b> salary slips only — use <b>Submit Drafts</b> later when amounts are verified.<br>
+          Employees: <b>${window._bs.rows.length}</b> · Estimated net: <b>${fmt_num(window._bs.rows.reduce((s,r)=>s+r.net,0))}</b><br>
           Period (from saved batch): <b>${batch_start || "—"}</b> → <b>${batch_end || "—"}</b>
           ${batch_posting ? ` · Posting <b>${batch_posting}</b>` : ""}<br>
-          <span style="font-size:11px;color:#64748b">Dates are not changed during slip creation. Edit the batch header first if the period is wrong.</span>
-        </div>` },
+          <span style="font-size:11px;color:#64748b">Dates are not changed during slip creation.</span>
+        </div>
+        ${has_submitted_slips ? `<div class="bs-notice bs-notice-warn" style="margin-bottom:12px">Submitted slips already exist. Enable <b>Cancel and Recreate</b> below to replace them with new drafts.</div>` : ""}` },
       { fieldtype:"Link", fieldname:"company", options:"Company",
         label:"Company", reqd:1, default:company },
       { fieldtype:"Check", fieldname:"replace_existing_slips",
         label:"Cancel and Recreate Existing Slips",
-        description:"Tick this when draft slips already exist or amounts were wrong.",
-        default: (frm.doc.employees || []).some((r) => r.salary_slip) ? 1 : 0 },
+        description:"Required when submitted slips exist and you need new draft slips with updated amounts.",
+        default: has_submitted_slips || has_existing_slips ? 1 : 0 },
       { fieldtype:"Check", fieldname:"create_missing_only",
         label:"Create Missing Slips Only", default: config.create_missing_only ? 1 : 0 },
     ],
@@ -758,6 +761,41 @@ async function process_bulk(frm, vals) {
 
       const exists = await bs_existing_salary_slip(row, vals);
       if (exists && !vals.replace_existing_slips) {
+        const slip_meta = await bs_call("frappe.client.get_value", {
+          doctype: "Salary Slip",
+          filters: { name: exists },
+          fieldname: ["docstatus"],
+        });
+        const slip_docstatus = parseInt(slip_meta.message?.docstatus || 0, 10);
+        if (slip_docstatus === 1) {
+          const msg = `Submitted slip <b>${exists}</b> already exists — tick <b>Cancel and Recreate</b> to create a new draft.`;
+          row.salary_slip = exists;
+          row.status = "Skipped";
+          row.salary_slip_status = "Submitted";
+          row.error_message = msg.replace(/<[^>]+>/g, "");
+          const child = bs_find_child_row(frm, row);
+          if (child) {
+            child.salary_slip = exists;
+            child.status = row.status;
+            child.salary_slip_status = "Submitted";
+            child.error_message = row.error_message;
+          }
+          log(`<span class="bs-log-emp">${row.employee}</span> — ${msg}`, "error");
+          results.push({
+            employee: row.employee,
+            employee_name: row.employee_name,
+            slip_name: exists,
+            ctc: row.ctc,
+            ot_amount: row.ot_amount,
+            gross: row.gross,
+            adv_deduct: row.adv_deduct,
+            net: row.net,
+            status: "Skipped",
+            error: row.error_message,
+            payment_entry: row.payment_entry || "",
+          });
+          continue;
+        }
         row.salary_slip = exists;
         row.status = "Skipped";
         row.error_message = vals.create_missing_only
@@ -827,7 +865,7 @@ async function process_bulk(frm, vals) {
         end_date: vals.end_date,
         posting_date: vals.posting_date,
         ctc: row.ctc || 0,
-        submit_slip: vals.submit_slips ? 1 : 0,
+        submit_slip: 0,
         cancel_existing: exists && vals.replace_existing_slips ? 1 : 0,
       });
 

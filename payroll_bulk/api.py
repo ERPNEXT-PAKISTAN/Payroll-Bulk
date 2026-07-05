@@ -1366,14 +1366,36 @@ def create_bulk_payment_journal_entry(
 	}
 
 
+def _resolve_batch_accrual_journal_entry(batch, salary_slips) -> str | None:
+	"""Link batch to accrual JE already set on submitted salary slips."""
+	if batch.get("accrual_journal_entry"):
+		return batch.accrual_journal_entry
+
+	existing = sorted({slip.journal_entry for slip in salary_slips if slip.journal_entry})
+	if not existing:
+		return None
+	if len(existing) == 1:
+		je_name = existing[0]
+		batch.db_set("accrual_journal_entry", je_name)
+		frappe.db.commit()
+		return je_name
+
+	frappe.throw(
+		_("Submitted slips in this batch use multiple accrual Journal Entries: {0}.").format(
+			", ".join(existing)
+		)
+	)
+
+
 @frappe.whitelist()
 def create_bulk_accrual_journal_entry(batch_name: str):
 	"""Create accrual JE from submitted slips (reuses Payroll Entry accounting)."""
 	batch, salary_slips = _get_batch_submitted_salary_slips(batch_name)
 	pending_slips = [slip for slip in salary_slips if not slip.journal_entry]
 	if not pending_slips:
-		if batch.accrual_journal_entry:
-			return {"journal_entry": batch.accrual_journal_entry, "created": False}
+		resolved = _resolve_batch_accrual_journal_entry(batch, salary_slips)
+		if resolved:
+			return {"journal_entry": resolved, "created": False, "linked": True}
 		frappe.throw(_("All submitted Salary Slips in this batch already have accrual Journal Entries."))
 
 	payroll_payable_account = _get_common_payroll_payable_account(pending_slips)
@@ -2472,6 +2494,11 @@ def create_bulk_salary_slip(
 			frappe.log_error(title=f"Bulk Salary Slip post-submit warning ({slip.name})")
 	else:
 		slip.reload()
+		if slip.docstatus == 1 and not cint(submit_slip):
+			frappe.log_error(
+				title=f"Unexpected submitted Salary Slip ({slip.name})",
+				message=f"Bulk batch {batch_name} requested draft slip but {slip.name} is submitted.",
+			)
 
 	return {
 		"name": slip.name,

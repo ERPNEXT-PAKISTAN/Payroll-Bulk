@@ -87,10 +87,8 @@ frappe.ui.form.on("Bulk Salary Creation", {
         bs_merge_saved_rows_from_frm(frm);
         if (typeof bs_restore_source_controls_from_doc === "function") {
           bs_restore_source_controls_from_doc(frm).then(async () => {
-            const saved_ot = bs_get_active_overtime_source(frm);
-            if (saved_ot === "Manual") {
-              bs_apply_overtime_source_to_rows(frm);
-            }
+            bs_merge_saved_rows_from_frm(frm);
+            window._bs.rows.forEach(recalc_row);
             await bs_trigger_source_reload({ force: true });
             if (typeof bs_tidy_form_after_ui === "function") bs_tidy_form_after_ui(frm);
           });
