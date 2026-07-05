@@ -392,6 +392,7 @@ PB_REPORTS = [
 	("Bulk Salary Employee Detail", "Bulk Salary Creation Employee"),
 	("Bulk Salary Payment Status", "Bulk Salary Creation Employee"),
 	("Bulk Salary Slip Reconciliation", "Bulk Salary Creation"),
+	("Bulk Salary Component Reconciliation", "Bulk Salary Creation"),
 	("Bulk Salary Component Detail", "Bulk Salary Creation"),
 	("Bulk Salary Advance Summary", "Bulk Salary Creation"),
 ]
@@ -401,6 +402,7 @@ PB_REPORT_SHORTCUTS = [
 	("Employee Detail", "Bulk Salary Employee Detail", "Bulk Salary Creation Employee", "Cyan"),
 	("Payment Status", "Bulk Salary Payment Status", "Bulk Salary Creation Employee", "Orange"),
 	("Slip Reconciliation", "Bulk Salary Slip Reconciliation", "Bulk Salary Creation", "Red"),
+	("Component Reconciliation", "Bulk Salary Component Reconciliation", "Bulk Salary Creation", "Pink"),
 	("Component Detail", "Bulk Salary Component Detail", "Bulk Salary Creation", "Purple"),
 	("Advance Summary", "Bulk Salary Advance Summary", "Bulk Salary Creation", "Yellow"),
 ]

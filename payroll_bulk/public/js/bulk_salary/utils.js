@@ -100,7 +100,7 @@ function bs_apply_saved_component_map(row) {
 function bs_capture_row_saved_components(row) {
   row._saved_component_map = bs_saved_components_to_map(
     (row.components || [])
-      .filter((item) => item.component && !item.auto_calculated)
+      .filter((item) => item.component && parseFloat(item.amount || 0) > 0)
       .map((item) => ({
         salary_component: item.component,
         component_type: item.type || "Earning",
@@ -573,18 +573,23 @@ function inject_bs_styles() {
     .bs-expand-panel-compact{padding:6px 8px}
     .bs-comp-split{display:grid;grid-template-columns:1fr 1fr;gap:6px;align-items:start}
     .bs-comp-col{display:flex;flex-direction:column;gap:4px;min-width:0}
+    .bs-comp-col-head{display:flex;align-items:center;justify-content:flex-start;gap:4px;min-height:22px}
+    .bs-comp-add-btn{width:22px;height:22px;flex-shrink:0;border-radius:5px;border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:15px;font-weight:700;line-height:1;cursor:pointer;padding:0;display:inline-flex;align-items:center;justify-content:center}
+    .bs-comp-add-btn:hover{background:#f8fafc;border-color:#94a3b8}
+    .bs-comp-add-btn-earn:hover{background:#ecfdf5;border-color:#86efac;color:#166534}
+    .bs-comp-add-btn-ded:hover{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
     .bs-comp-col-title{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:.5px;padding:2px 6px;border-radius:4px;width:fit-content}
     .bs-comp-col-title-earn{background:#ecfdf5;color:#166534;border:1px solid #bbf7d0}
     .bs-comp-col-title-ded{background:#fef2f2;color:#b91c1c;border:1px solid #fecaca}
-    .bs-comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:4px}
-    .bs-comp-card{border:1px solid #e2e8f0;border-radius:5px;padding:3px 6px;background:#fff;min-width:0}
+    .bs-comp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:6px;align-content:start}
+    .bs-comp-card{border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px;background:#fff;min-width:0;display:flex;flex-direction:column;justify-content:center}
     .bs-comp-card-earn{border-color:#bbf7d0;background:#f8fffb}
     .bs-comp-card-ded{border-color:#fecaca;background:#fffafa}
-    .bs-comp-card-label{font-size:9px;font-weight:700;color:#64748b;line-height:1.15;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;margin-bottom:1px;min-height:0}
+    .bs-comp-card-label{font-size:10px;font-weight:700;color:#64748b;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;margin-bottom:3px;min-height:0}
     .bs-comp-card-earn .bs-comp-card-label{color:#166534}
     .bs-comp-card-ded .bs-comp-card-label{color:#b91c1c}
-    .bs-comp-card input{width:100%;border:none;background:transparent;padding:0;font-size:12px;font-weight:700;color:inherit;min-height:16px;line-height:1.1;-moz-appearance:textfield;appearance:textfield}
-    .bs-comp-card-sub{font-size:9px;font-weight:600;color:#64748b;line-height:1.25;margin-bottom:2px;white-space:nowrap}
+    .bs-comp-card input{width:100%;border:none;background:transparent;padding:0;font-size:14px;font-weight:700;color:inherit;min-height:20px;line-height:1.2;-moz-appearance:textfield;appearance:textfield}
+    .bs-comp-card-sub{font-size:10px;font-weight:600;color:#64748b;line-height:1.25;margin-bottom:3px;white-space:nowrap}
     .bs-comp-card input::-webkit-outer-spin-button,.bs-comp-card input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
     .bs-comp-card input:focus{outline:none}
     .bs-comp-card-auto input{color:#64748b;font-weight:600}

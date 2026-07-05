@@ -111,7 +111,7 @@ function bs_sync_to_frm(frm) {
     if (row.payment_entry) c.payment_entry = row.payment_entry;
 
     (row.components || [])
-      .filter((item) => item.component && !item.auto_calculated && parseFloat(item.amount || 0) > 0)
+      .filter((item) => item.component && parseFloat(item.amount || 0) > 0)
       .forEach((item) => {
         const component_row = frappe.model.add_child(frm.doc, "Bulk Salary Component Entry", "component_entries");
         component_row.employee_row = c.name || row.row_name || "";
@@ -215,6 +215,19 @@ function bs_render_structure_summary() {
   if (accrualBtn) accrualBtn.disabled = true;
 }
 
+function bs_count_draft_slip_rows(frm) {
+  const rows = window._bs.rows || frm?.doc?.employees || [];
+  return rows.filter((row) => row.salary_slip && row.salary_slip_status === "Draft").length;
+}
+
+function bs_update_draft_actions_visibility(frm) {
+  const count = bs_count_draft_slip_rows(frm);
+  const btn = document.getElementById("bs-update-drafts-btn");
+  if (!btn) return;
+  btn.style.display = count ? "" : "none";
+  btn.textContent = count === 1 ? "Update Draft Slip" : `Update Draft Slips (${count})`;
+}
+
 function bs_render_live_summary(frm) {
   if (!frm) return;
   bs_update_parent_summary(frm);
@@ -229,6 +242,7 @@ function bs_render_live_summary(frm) {
   set_text("bs-card-submitted", String(frm.doc.submitted_count || 0));
   set_text("bs-card-cancelled", String(frm.doc.cancelled_count || 0));
   bs_render_structure_summary();
+  bs_update_draft_actions_visibility(frm);
 }
 
 function bs_find_child_row(frm, row) {
@@ -545,7 +559,7 @@ async function bs_prepare_salary_inputs(row, vals, batch_name) {
 
   for (const item of (row.components || [])) {
     const amount = parseFloat(item.amount || 0);
-    if (!item.component || amount <= 0 || item.auto_calculated) continue;
+    if (!item.component || amount <= 0) continue;
     await bs_make_additional_salary({
       employee: row.employee,
       company: vals.company,

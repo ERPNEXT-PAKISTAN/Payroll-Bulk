@@ -1065,7 +1065,7 @@
       "fieldname": "piece_basis",
       "fieldtype": "Select",
       "label": "Piece Basis",
-      "options": "Total Hours\nTotal Qty",
+      "options": "Total Hours\nTotal Qty\nTotal Hours and Qty",
       "default": "Total Hours"
     },
     {

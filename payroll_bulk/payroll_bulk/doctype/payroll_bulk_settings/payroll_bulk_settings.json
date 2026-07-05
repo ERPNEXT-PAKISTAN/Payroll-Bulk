@@ -138,7 +138,7 @@
    "fieldname": "default_per_piece_basis",
    "fieldtype": "Select",
    "label": "Default Per Piece Basis",
-   "options": "Total Hours\nTotal Qty"
+   "options": "Total Hours\nTotal Qty\nTotal Hours and Qty"
   },
   {
    "fieldname": "column_break_calc",

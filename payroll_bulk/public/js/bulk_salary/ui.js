@@ -78,6 +78,14 @@ function bs_effective_salary_days(row, frm) {
   return parseFloat(row.payment_days || 0) || 30;
 }
 
+function bs_piece_basis_flags(piece_basis) {
+  const basis = piece_basis || "Total Hours";
+  return {
+    use_hours: basis === "Total Hours" || basis === "Total Hours and Qty",
+    use_qty: basis === "Total Qty" || basis === "Total Hours and Qty",
+  };
+}
+
 function bs_calculate_base_pay(row, frm) {
   const mode = frm?.doc?.calculation_mode || "Manual";
   const daily = parseFloat(row.ctc || 0) / 30;
@@ -90,6 +98,9 @@ function bs_calculate_base_pay(row, frm) {
 
   if (bs_is_piece_mode(mode)) {
     const basis = frm?.doc?.per_piece_basis || "Total Hours";
+    if (basis === "Total Hours and Qty") {
+      return (parseFloat(row.hours_amount || 0) || 0) + (parseFloat(row.qty_amount || 0) || 0);
+    }
     if (basis === "Total Qty") {
       return parseFloat(row.qty_amount || 0) || 0;
     }
@@ -810,8 +821,8 @@ function bs_collect_source_values(frm) {
     attendance_source: bs_get_mode_attendance_source(calculation_mode),
     overtime_source: bs_control_get_value(controls.overtime_source) || frm.doc.overtime_source || bs_get_default_overtime_source(calculation_mode, window._bs?.settings),
   per_piece_basis: bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours",
-    use_hours: (bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours") === "Total Hours" ? 1 : 0,
-    use_qty: (bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours") === "Total Qty" ? 1 : 0,
+    use_hours: bs_piece_basis_flags(bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours").use_hours ? 1 : 0,
+    use_qty: bs_piece_basis_flags(bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours").use_qty ? 1 : 0,
     overtime_with_salary: 0,
     overtime_doctype: bs_control_get_value(controls.overtime_doctype).trim(),
     overtime_employee_field: bs_control_get_value(controls.overtime_employee_field).trim(),
@@ -840,8 +851,9 @@ function bs_normalize_source_values(values) {
   }
   if (bs_is_piece_mode(mode)) {
     next.per_piece_basis = next.per_piece_basis || "Total Hours";
-    next.use_hours = next.per_piece_basis === "Total Hours" ? 1 : 0;
-    next.use_qty = next.per_piece_basis === "Total Qty" ? 1 : 0;
+    const flags = bs_piece_basis_flags(next.per_piece_basis);
+    next.use_hours = flags.use_hours ? 1 : 0;
+    next.use_qty = flags.use_qty ? 1 : 0;
     next.overtime_with_salary = 0;
   } else {
     next.per_piece_basis = next.per_piece_basis || "Total Hours";
@@ -881,8 +893,14 @@ function bs_refresh_source_ui() {
   const show_custom_map = overtime_source === "Custom DocType" || use_piece;
   $(".bs-source-map-field").toggle(show_custom_map);
   bs_refresh_overtime_source_options(mode, overtime_source);
-  $(".bs-source-hours-field").toggle(show_custom_map);
-  $(".bs-source-map-piece").toggle(show_custom_map && use_piece);
+  if (use_piece) {
+    const piece_flags = bs_piece_basis_flags(bs_control_get_value(controls.per_piece_basis) || frm.doc.per_piece_basis || "Total Hours");
+    $(".bs-source-hours-field").toggle(show_custom_map && piece_flags.use_hours);
+    $(".bs-source-map-piece").toggle(show_custom_map && piece_flags.use_qty);
+  } else {
+    $(".bs-source-hours-field").toggle(show_custom_map);
+    $(".bs-source-map-piece").toggle(false);
+  }
   $(".bs-per-piece-basis-field").toggle(use_piece);
   $("#bs-load-source-btn").toggle(
     bs_needs_days_load(frm) || bs_needs_overtime_load(frm) || bs_needs_piece_salary_load(frm),
@@ -902,7 +920,9 @@ function bs_refresh_source_ui() {
     const basis = frm.doc.per_piece_basis || "Total Hours";
     note = basis === "Total Hours"
       ? "Salary: Hours × hourly rate from custom source. Overtime: separate Overtime Source only."
-      : "Salary: Qty × rate from custom source. Overtime: separate Overtime Source only.";
+      : basis === "Total Qty"
+        ? "Salary: Qty × rate from custom source. Overtime: separate Overtime Source only."
+        : "Salary: Hours × hourly rate + Qty × rate from custom source. Overtime: separate Overtime Source only.";
   }
   $("#bs-source-note").text(note);
 }
@@ -1164,8 +1184,10 @@ async function bs_bind_source_controls(frm, settings, $wrap) {
 
   source_ctrls.per_piece_basis.on("change", () => {
     const basis = bs_control_get_value(source_ctrls.per_piece_basis) || "Total Hours";
-    source_ctrls.global_use_hours.prop("checked", basis === "Total Hours");
-    source_ctrls.global_use_qty.prop("checked", basis === "Total Qty");
+    const flags = bs_piece_basis_flags(basis);
+    source_ctrls.global_use_hours.prop("checked", flags.use_hours);
+    source_ctrls.global_use_qty.prop("checked", flags.use_qty);
+    bs_refresh_source_ui();
   });
 
   await bs_sync_source_doc(frm);
@@ -1340,6 +1362,7 @@ async function render_main_ui(frm) {
                   <option value="" disabled hidden>Piece Basis</option>
                   <option value="Total Hours">Total Hours</option>
                   <option value="Total Qty">Total Qty</option>
+                  <option value="Total Hours and Qty">Total Hours and Qty</option>
                 </select>
               </div>
               <input id="bs-global-use-hours" type="checkbox" hidden />
@@ -1390,6 +1413,7 @@ async function render_main_ui(frm) {
                 <option value="" disabled hidden>Piece Basis</option>
                 <option value="Total Hours">Total Hours</option>
                 <option value="Total Qty">Total Qty</option>
+                <option value="Total Hours and Qty">Total Hours and Qty</option>
               </select>
             </div>
             <input id="bs-global-use-hours" type="checkbox" hidden />
@@ -1462,7 +1486,7 @@ async function render_main_ui(frm) {
       </div>
 
       <div class="bs-footer-row">
-        <span class="bs-footer-hint">Expand a row for components, structure, and advances. Use ⋮ menu for slip actions.</span>
+        <span class="bs-footer-hint">Expand a row for components — use + to add earnings/deductions. ⋮ menu for slip actions.</span>
         <span id="bs-total-display" class="bs-total-badge" style="display:none"></span>
       </div>
 
@@ -1500,6 +1524,7 @@ async function render_main_ui(frm) {
           <div class="bs-action-group">
             <button class="bs-btn-secondary" id="bs-refresh-all-btn">Refresh Status</button>
             <button class="bs-btn-secondary" id="bs-open-submitted-btn">Open Slips</button>
+            <button class="bs-btn-secondary" id="bs-update-drafts-btn" style="display:none">Update Draft Slips</button>
             <button class="bs-btn-secondary" id="bs-submit-drafts-btn">Submit Drafts</button>
           </div>
           <div class="bs-action-group">
@@ -1594,6 +1619,7 @@ async function render_main_ui(frm) {
   emp_ctrl && $wrap.find("#bs-emp-link-wrap input").on("keydown", (e) => { if (e.key==="Enter") bs_quick_add(); });
   $wrap.find("#bs-refresh-all-btn").on("click",    () => bs_refresh_all_statuses());
   $wrap.find("#bs-open-submitted-btn").on("click", () => bs_open_submitted_slips());
+  $wrap.find("#bs-update-drafts-btn").on("click", () => bs_update_draft_slips());
   $wrap.find("#bs-submit-drafts-btn").on("click",  () => bs_submit_draft_slips());
   $wrap.find("#bs-create-accrual-btn").on("click", () => bs_create_accrual_journal_entry());
   $wrap.find("#bs-create-missing-btn").on("click", () => open_payroll_dialog({ create_missing_only: true }));
@@ -2033,6 +2059,132 @@ async function bs_resolve_special_component(row, vals, kind) {
   return "";
 }
 
+function bs_merge_extra_components(row, items) {
+  const merged = [...(items || [])];
+  const seen = new Set(
+    merged.map((item) => `${item.type || "Earning"}::${item.component}`),
+  );
+  const add_extra = (item) => {
+    if (!item?.component) return;
+    const type = item.type || "Earning";
+    const seen_key = `${type}::${item.component}`;
+    if (seen.has(seen_key)) return;
+    const role = item.role || bs_get_component_role(item.component, type);
+    if (role === "advance" || role === "skip") return;
+    seen.add(seen_key);
+    merged.push({
+      key: item.key || bs_normalize_component_key(type, item.component),
+      component: item.component,
+      label: item.label || item.component,
+      type,
+      role: role === "base" || role === "overtime" || role === "qty" ? "manual" : role,
+      auto_calculated: false,
+      amount: parseFloat(item.amount || 0) || 0,
+      user_added: !!item.user_added,
+      from_additional_salary: !!item.from_additional_salary,
+    });
+  };
+
+  (row.components || []).forEach((item) => {
+    if (item.user_added || item.from_additional_salary) {
+      add_extra(item);
+      return;
+    }
+    const amount = parseFloat(item.amount || 0) || 0;
+    const seen_key = `${item.type || "Earning"}::${item.component}`;
+    if (!seen.has(seen_key) && amount > 0 && !item.auto_calculated) {
+      add_extra(item);
+    }
+  });
+
+  if (row._saved_component_map) {
+    Object.entries(row._saved_component_map).forEach(([map_key, amount]) => {
+      if (parseFloat(amount || 0) <= 0 || !map_key.includes("::")) return;
+      const [type, component] = map_key.split("::", 2);
+      if (!component) return;
+      add_extra({ component, type, amount, user_added: true });
+    });
+  }
+
+  return merged;
+}
+
+function bs_append_row_component(row, component, component_type) {
+  if (!row || !component) return false;
+  const type = component_type || "Earning";
+  const key = bs_normalize_component_key(type, component);
+  row.components = row.components || [];
+  const existing = row.components.find(
+    (item) => item.component === component && (item.type || "Earning") === type,
+  );
+  if (existing) {
+    frappe.show_alert({ message: __("Component already added"), indicator: "orange" }, 3);
+    window._bs.expanded_rows[row._id] = true;
+    return false;
+  }
+
+  const role = bs_get_component_role(component, type);
+  if (role === "advance") {
+    frappe.show_alert({
+      message: __("Use the Advances panel for advance deductions"),
+      indicator: "orange",
+    }, 4);
+    return false;
+  }
+
+  row.components.push({
+    key,
+    component,
+    label: component,
+    type,
+    role: role === "base" || role === "overtime" || role === "qty" ? "manual" : role,
+    auto_calculated: false,
+    amount: 0,
+    user_added: true,
+  });
+  bs_capture_row_saved_components(row);
+  recalc_row(row);
+  window._bs.expanded_rows[row._id] = true;
+  return true;
+}
+
+window.bs_add_row_component = (row_id, component_type, event) => {
+  event?.stopPropagation?.();
+  event?.preventDefault?.();
+  const row = window._bs.rows.find((r) => r._id === row_id);
+  if (!row) return;
+
+  const type = component_type === "Deduction" ? "Deduction" : "Earning";
+  const d = new frappe.ui.Dialog({
+    title: type === "Earning" ? __("Add Earning Component") : __("Add Deduction Component"),
+    fields: [
+      {
+        fieldtype: "Link",
+        fieldname: "salary_component",
+        label: __("Salary Component"),
+        options: "Salary Component",
+        reqd: 1,
+        get_query() {
+          return { filters: { disabled: 0, type } };
+        },
+      },
+    ],
+    primary_action_label: __("Add"),
+    primary_action(values) {
+      if (!values.salary_component) return;
+      if (bs_append_row_component(row, values.salary_component, type)) {
+        d.hide();
+        bs_render_table();
+        frappe.show_alert({
+          message: __("{0} added", [values.salary_component]),
+          indicator: "green",
+        }, 3);
+      }
+    },
+  });
+  d.show();
+};
+
 function bs_build_row_components(row, structure_doc, options = {}) {
   const include_structure = options.include_structure !== false;
   const current_mode = window._bs.frm?.doc?.calculation_mode || "Manual";
@@ -2147,7 +2299,7 @@ function bs_build_row_components(row, structure_doc, options = {}) {
       });
     }
 
-    row.components = manual_items.concat(auto_items);
+    row.components = bs_merge_extra_components(row, manual_items).concat(auto_items);
     bs_apply_saved_component_map(row);
     return;
   }
@@ -2169,7 +2321,7 @@ function bs_build_row_components(row, structure_doc, options = {}) {
       item.amount = parseFloat(row.qty_amount || 0) || 0;
     }
   });
-  row.components = filtered_items;
+  row.components = bs_merge_extra_components(row, filtered_items);
   bs_apply_saved_component_map(row);
 }
 
@@ -2228,6 +2380,7 @@ function bs_build_row_menu_items(r) {
   });
   if (r.salary_structure_assignment) items.push(`<button type="button" class="bs-menu-item" onclick="bs_open_doc('Salary Structure Assignment','${r.salary_structure_assignment}')">Open Assignment</button>`);
   else items.push(`<button type="button" class="bs-menu-item" onclick="bs_new_assignment('${r.employee}','${r.salary_structure || ""}')">New Assignment</button>`);
+  if (can_delete_draft) items.push(`<button type="button" class="bs-menu-item" onclick="bs_update_draft_row(${r._id})">Update Draft Slip</button>`);
   items.push(`<button type="button" class="bs-menu-item" onclick="bs_reprocess_row(${r._id},0)">Recreate Draft</button>`);
   if (r.salary_slip) items.push(`<button type="button" class="bs-menu-item" onclick="bs_reprocess_row(${r._id},1)">Recreate & Submit</button>`);
   if (can_pay_row) items.push(`<button type="button" class="bs-menu-item" onclick="bs_create_single_payment('${r.employee}')">Pay Employee</button>`);
@@ -2307,18 +2460,24 @@ function bs_build_expanded_panel(r, mode, hourly, hours_amount, qty_amount) {
     work_body += rates_footer;
   }
 
-  const components_body = (earning_cards || deduction_cards)
-    ? `<div class="bs-comp-split">
+  const components_body = `<div class="bs-comp-split">
         <div class="bs-comp-col">
-          <div class="bs-comp-col-title bs-comp-col-title-earn">Earnings</div>
+          <div class="bs-comp-col-head">
+            <div class="bs-comp-col-title bs-comp-col-title-earn">Earnings</div>
+            <button type="button" class="bs-comp-add-btn bs-comp-add-btn-earn" title="${__("Add earning component")}"
+              onclick="bs_add_row_component(${r._id},'Earning',event)">+</button>
+          </div>
           <div class="bs-comp-grid">${earning_cards || `<div class="bs-adv-summary">—</div>`}</div>
         </div>
         <div class="bs-comp-col">
-          <div class="bs-comp-col-title bs-comp-col-title-ded">Deductions</div>
+          <div class="bs-comp-col-head">
+            <div class="bs-comp-col-title bs-comp-col-title-ded">Deductions</div>
+            <button type="button" class="bs-comp-add-btn bs-comp-add-btn-ded" title="${__("Add deduction component")}"
+              onclick="bs_add_row_component(${r._id},'Deduction',event)">+</button>
+          </div>
           <div class="bs-comp-grid">${deduction_cards || `<div class="bs-adv-summary">—</div>`}</div>
         </div>
-      </div>`
-    : `<div class="bs-adv-summary">No components configured</div>`;
+      </div>`;
 
   const adv_lines = bs_build_advances_panel_html(r);
 
@@ -2553,6 +2712,196 @@ function bs_match_row_filter(row, filter, query="") {
 window.bs_remove_row = (id) => {
   window._bs.rows = window._bs.rows.filter((r) => r._id !== id);
   bs_render_table();
+};
+
+function bs_show_update_draft_result_dialog(payload = {}) {
+  const updated = payload.updated || [];
+  const failed = payload.failed || [];
+  const skipped = payload.skipped || [];
+  const summary = payload.summary || {};
+  const indicator = failed.length ? (updated.length ? "orange" : "red") : (updated.length ? "green" : "orange");
+  const title = failed.length
+    ? (updated.length ? "Update Draft Slips — Partial Success" : "Update Draft Slips — Failed")
+    : (updated.length ? "Update Draft Slips — Successful" : "Update Draft Slips");
+
+  const render_change_lines = (changes = []) => {
+    if (!changes.length) return `<span style="color:var(--bs-muted)">No component amount changes</span>`;
+    return `<ul style="margin:4px 0 0;padding-left:18px">${changes.map((change) => {
+      const diff = parseFloat(change.diff || 0);
+      const diff_color = diff > 0 ? "var(--bs-green)" : "var(--bs-red)";
+      return `<li>${frappe.utils.escape_html(change.salary_component || "")}: ${fmt_num(change.before || 0)} → ${fmt_num(change.after || 0)} <span style="color:${diff_color}">(${diff >= 0 ? "+" : ""}${fmt_num(diff)})</span></li>`;
+    }).join("")}</ul>`;
+  };
+
+  let html = `<div class="bs-notice bs-notice-${indicator === "green" ? "success" : indicator === "orange" ? "warn" : "error"}" style="margin-bottom:10px">
+    <b>${summary.updated_count ?? updated.length} updated</b>
+    ${summary.unchanged_count ? ` · ${summary.unchanged_count} unchanged` : ""}
+    ${failed.length ? ` · <b style="color:var(--bs-red)">${failed.length} failed</b>` : ""}
+    ${skipped.length ? ` · ${skipped.length} skipped` : ""}
+  </div>`;
+
+  if (updated.length) {
+    html += `<div style="margin-bottom:10px"><div style="font-weight:700;color:var(--bs-green);margin-bottom:4px">Updated</div>`;
+    updated.forEach((item) => {
+      const label = frappe.utils.escape_html(item.employee_name || item.employee || "");
+      const slip_ref = item.salary_slip || item.name || "";
+      html += `<div style="margin-bottom:8px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc">
+        <div><b>${label}</b>${slip_ref ? ` · <span class="bs-mono">${frappe.utils.escape_html(String(slip_ref).split("/").pop())}</span>` : ""}</div>
+        <div style="font-size:12px;color:#475569;margin-top:4px">Gross ${fmt_num(item.before_gross || 0)} → ${fmt_num(item.after_gross || item.gross_pay || 0)} · Net ${fmt_num(item.before_net || 0)} → ${fmt_num(item.after_net || item.net_pay || 0)}</div>
+        ${render_change_lines(item.changes || [])}
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  if (failed.length) {
+    html += `<div style="margin-bottom:10px"><div style="font-weight:700;color:var(--bs-red);margin-bottom:4px">Failed</div><ul style="margin:0;padding-left:18px">`;
+    failed.forEach((item) => {
+      html += `<li><b>${frappe.utils.escape_html(item.employee_name || item.employee || "")}</b>: ${frappe.utils.escape_html(item.error || "Failed")}</li>`;
+    });
+    html += `</ul></div>`;
+  }
+
+  if (skipped.length) {
+    html += `<div><div style="font-weight:700;color:#b45309;margin-bottom:4px">Skipped</div><ul style="margin:0;padding-left:18px">`;
+    skipped.forEach((item) => {
+      html += `<li><b>${frappe.utils.escape_html(item.employee_name || item.employee || "")}</b>: ${frappe.utils.escape_html(item.reason || "Skipped")}</li>`;
+    });
+    html += `</ul></div>`;
+  }
+
+  frappe.msgprint({ title, message: html, indicator, wide: true });
+}
+window.bs_show_update_draft_result_dialog = bs_show_update_draft_result_dialog;
+
+async function bs_refresh_frm_after_bulk_update(frm) {
+  if (!frm) return;
+  await frm.reload_doc();
+  if (window._bs?.rows?.length && typeof bs_merge_saved_rows_from_frm === "function") {
+    bs_merge_saved_rows_from_frm(frm);
+    window._bs.rows.forEach((row) => {
+      if (typeof recalc_row === "function") recalc_row(row);
+    });
+    bs_render_table();
+    bs_render_live_summary(frm);
+  }
+}
+
+async function bs_persist_batch_before_slip_update(frm) {
+  if (!frm?.doc?.name) {
+    frappe.throw(__("Save the batch first."));
+  }
+  if (window._bs.rows?.length) {
+    bs_sync_to_frm(frm);
+  }
+  if (frm.is_dirty()) {
+    await new Promise((res, rej) => frm.save("Save", (r) => (r.exc ? rej(new Error(r.exc)) : res(r))));
+  }
+  await frm.reload_doc();
+  if (window._bs.rows?.length && typeof bs_merge_saved_rows_from_frm === "function") {
+    bs_merge_saved_rows_from_frm(frm);
+  }
+}
+
+async function bs_update_draft_slips(options = {}) {
+  const frm = window._bs.frm;
+  if (!frm?.doc?.name) {
+    frappe.show_alert({ message: "Save the batch first.", indicator: "orange" }, 4);
+    return;
+  }
+
+  const draft_rows = (window._bs.rows || frm.doc.employees || []).filter(
+    (row) => row.salary_slip && row.salary_slip_status === "Draft",
+  );
+  if (!draft_rows.length) {
+    frappe.show_alert({ message: "No draft Salary Slips to update.", indicator: "orange" }, 4);
+    return;
+  }
+
+  const silent = !!options.silent;
+  if (!silent) {
+    const confirmed = await new Promise((resolve) => {
+      frappe.confirm(
+        `Update <b>${draft_rows.length}</b> draft Salary Slip(s) with the current batch amounts?<br>Existing draft slips will be corrected — nothing will be cancelled or deleted.`,
+        () => resolve(true),
+        () => resolve(false),
+      );
+    });
+    if (!confirmed) return;
+  }
+
+  frappe.dom.freeze(`Updating ${draft_rows.length} draft Salary Slip(s)…`);
+  try {
+    await bs_persist_batch_before_slip_update(frm);
+
+    const res = await bs_call("payroll_bulk.api.update_bulk_draft_slips", {
+      batch_name: frm.doc.name,
+    });
+    const payload = res.message || res || {};
+    const updated = payload.updated || [];
+    const failed = payload.failed || [];
+    const skipped = payload.skipped || [];
+
+    updated.forEach((item) => {
+      const row = (window._bs.rows || []).find((r) => r.employee === item.employee);
+      if (!row) return;
+      row.salary_slip = item.name || item.salary_slip || row.salary_slip;
+      row.salary_slip_status = "Draft";
+      row.status = "Slip Created";
+      row.gross = parseFloat(item.after_gross ?? item.gross_pay ?? row.gross ?? 0);
+      row.net = parseFloat(item.after_net ?? item.net_pay ?? row.net ?? 0);
+      row.error_message = "";
+    });
+
+    await bs_refresh_frm_after_bulk_update(frm);
+    bs_show_update_draft_result_dialog(payload);
+
+    if (frm && typeof window.bs_is_completed_batch === "function" && window.bs_is_completed_batch(frm.doc)) {
+      window._bs._completed_view_batch = null;
+      render_submitted_view(frm);
+    }
+  } catch (error) {
+    frappe.msgprint({ title: "Update Draft Slips", message: error.message || String(error), indicator: "red" });
+  } finally {
+    frappe.dom.unfreeze();
+  }
+}
+
+window.bs_update_draft_slips = bs_update_draft_slips;
+
+window.bs_update_draft_row = async (id) => {
+  const frm = window._bs.frm;
+  const row = (window._bs.rows || []).find((r) => r._id === id);
+  if (!frm || !row || !row.row_name) {
+    frappe.show_alert({ message: "Save the batch first, then update.", indicator: "orange" }, 4);
+    return;
+  }
+  if (!row.salary_slip || row.salary_slip_status !== "Draft") {
+    frappe.show_alert({ message: "Only draft salary slips can be updated in place.", indicator: "orange" }, 4);
+    return;
+  }
+
+  frappe.dom.freeze("Updating draft salary slip…");
+  try {
+    await bs_persist_batch_before_slip_update(frm);
+    const result = await bs_call("payroll_bulk.api.update_bulk_draft_salary_slip", {
+      batch_name: frm.doc.name,
+      row_name: row.row_name,
+    });
+    const slip = result.message || result || {};
+    row.salary_slip = slip.name || row.salary_slip;
+    row.salary_slip_status = "Draft";
+    row.status = "Slip Created";
+    row.gross = parseFloat(slip.after_gross ?? slip.gross_pay ?? row.gross ?? 0);
+    row.net = parseFloat(slip.after_net ?? slip.net_pay ?? row.net ?? 0);
+    row.error_message = "";
+    await bs_refresh_frm_after_bulk_update(frm);
+    bs_show_update_draft_result_dialog({ updated: [slip], failed: [], skipped: [], summary: { updated_count: 1 } });
+  } catch (error) {
+    frappe.msgprint({ title: "Update Error", message: error.message || String(error), indicator: "red" });
+  } finally {
+    frappe.dom.unfreeze();
+  }
 };
 
 window.bs_reprocess_row = async (id, submit_slip = 0) => {
@@ -2992,7 +3341,7 @@ async function bs_submit_draft_slips() {
   );
   if (!draft_rows.length) {
     frappe.show_alert({ message: "No draft Salary Slips found — all linked slips are already submitted.", indicator: "green" }, 4);
-    if (frm && bs_is_completed_batch(frm.doc)) {
+    if (frm && typeof window.bs_is_completed_batch === "function" && window.bs_is_completed_batch(frm.doc)) {
       window._bs._completed_view_batch = null;
       render_submitted_view(frm);
     }
@@ -3041,7 +3390,7 @@ async function bs_submit_draft_slips() {
       bs_render_live_summary(frm);
     }
     frappe.show_alert({ message: "Draft Salary Slips submitted.", indicator: "green" }, 4);
-    if (frm && bs_is_completed_batch(frm.doc)) {
+    if (frm && typeof window.bs_is_completed_batch === "function" && window.bs_is_completed_batch(frm.doc)) {
       window._bs._completed_view_batch = null;
       render_submitted_view(frm);
     }
@@ -3060,6 +3409,7 @@ function recalc_row(row) {
   const daily = row.ctc / 30;
   const hourly = daily / 8;
   const piece_basis = frm.doc.per_piece_basis || "Total Hours";
+  const piece_flags = bs_piece_basis_flags(piece_basis);
 
   row.attendance_days = parseFloat(row.attendance_days || 0);
   row.absent_days = parseFloat(row.absent_days || 0);
@@ -3068,8 +3418,8 @@ function recalc_row(row) {
   row.source_hours = parseFloat(row.source_hours || 0);
   row.source_qty = parseFloat(row.source_qty || 0);
   row.piece_rate = parseFloat(row.piece_rate || 0);
-  row.use_hours = piece_basis === "Total Hours" ? 1 : 0;
-  row.use_qty = piece_basis === "Total Qty" ? 1 : 0;
+  row.use_hours = piece_flags.use_hours ? 1 : 0;
+  row.use_qty = piece_flags.use_qty ? 1 : 0;
   row.overtime_with_salary = 0;
   row.ot_input = parseFloat(row.ot_input || 0);
   row.worked_hours = parseFloat(row.worked_hours || 0);
@@ -3077,13 +3427,8 @@ function recalc_row(row) {
   row.overtime_hours = parseFloat(row.overtime_hours || 0);
 
   if (bs_is_piece_mode(mode)) {
-    if (piece_basis === "Total Qty") {
-      row.hours_amount = 0;
-      row.qty_amount = row.source_qty * row.piece_rate;
-    } else {
-      row.qty_amount = 0;
-      row.hours_amount = hourly * row.source_hours;
-    }
+    row.hours_amount = piece_flags.use_hours ? hourly * row.source_hours : 0;
+    row.qty_amount = piece_flags.use_qty ? row.source_qty * row.piece_rate : 0;
     row.base_pay = bs_calculate_base_pay(row, frm);
   } else {
     row.hours_amount = 0;
@@ -3476,14 +3821,15 @@ async function bs_load_piece_salary_data(options = {}) {
   }
 
   const piece_basis = frm.doc.per_piece_basis || "Total Hours";
+  const piece_flags = bs_piece_basis_flags(piece_basis);
   const res = await bs_call("payroll_bulk.api.get_bulk_source_values", {
     employees,
     source_doctype: frm.doc.overtime_doctype,
     employee_field: frm.doc.overtime_employee_field,
     date_field: frm.doc.overtime_date_field,
-    hours_field: piece_basis === "Total Hours" ? (frm.doc.overtime_hours_field || "") : "",
-    qty_field: piece_basis === "Total Qty" ? (frm.doc.overtime_qty_field || "") : "",
-    rate_field: piece_basis === "Total Qty" ? (frm.doc.overtime_rate_field || "") : "",
+    hours_field: piece_flags.use_hours ? (frm.doc.overtime_hours_field || "") : "",
+    qty_field: piece_flags.use_qty ? (frm.doc.overtime_qty_field || "") : "",
+    rate_field: piece_flags.use_qty ? (frm.doc.overtime_rate_field || "") : "",
     start_date,
     end_date,
     batch_name: frm.doc.name || "",
@@ -3492,14 +3838,17 @@ async function bs_load_piece_salary_data(options = {}) {
   window._bs.rows.forEach((row) => {
     const item = imported_rows[row.employee] || {};
     row.source_row_names = item.row_names || [];
-    if (piece_basis === "Total Qty") {
+    if (piece_flags.use_qty) {
       row.source_qty = parseFloat(item.qty || 0);
       row.piece_rate = parseFloat(item.rate || 0);
-      row.source_hours = 0;
     } else {
-      row.source_hours = parseFloat(item.hours || 0);
       row.source_qty = 0;
       row.piece_rate = 0;
+    }
+    if (piece_flags.use_hours) {
+      row.source_hours = parseFloat(item.hours || 0);
+    } else {
+      row.source_hours = 0;
     }
     recalc_row(row);
   });
@@ -3628,6 +3977,81 @@ function render_submitted_view(frm) {
     });
 }
 
+async function bs_build_component_reconcile_panel_html(frm) {
+  const rows_with_slips = (frm.doc.employees || []).filter((r) => r.salary_slip).length;
+  if (!rows_with_slips || !frm.doc.name) {
+    return "";
+  }
+  let data = { rows: [], summary: { total: 0, matched: 0, mismatch: 0, batch_only: 0, slip_only: 0, ads_only: 0, missing_slip: 0 } };
+  try {
+    const res = await bs_call("payroll_bulk.api.get_batch_component_reconciliation", { batch_name: frm.doc.name });
+    data = res.message || data;
+  } catch (error) {
+    return `<div class="bs-reconcile-panel"><div class="bs-reconcile-title">Component Reconciliation</div><div class="bs-notice bs-notice-warn">Could not load component reconciliation data.</div></div>`;
+  }
+
+  const summary = data.summary || {};
+  const issues = (data.rows || []).filter((r) => !r.match);
+  const show_rows = issues.length ? issues.slice(0, 12) : (data.rows || []).slice(0, 8);
+  const issue_count = (summary.mismatch || 0) + (summary.batch_only || 0) + (summary.slip_only || 0) + (summary.ads_only || 0) + (summary.missing_slip || 0);
+  const all_matched = issue_count === 0 && summary.matched > 0;
+
+  const mismatch_notice = issue_count
+    ? `<div class="bs-notice bs-notice-warn" style="margin-bottom:10px">
+        <b>${issue_count} component issue(s)</b> across batch, salary slip, and additional salary lines.
+      </div>`
+    : all_matched
+      ? `<div class="bs-notice bs-notice-success" style="margin-bottom:10px">
+          All ${summary.matched} component line(s) match across batch, slip, and ADS.
+        </div>`
+      : "";
+
+  const trs = show_rows.map((r) => `
+    <tr class="${r.match ? "bs-reconcile-row-ok" : "bs-reconcile-row-bad"}">
+      <td>${frappe.utils.escape_html(r.employee_name || r.employee || "")}</td>
+      <td>${frappe.utils.escape_html(r.salary_component || "—")}</td>
+      <td>${fmt_num(r.batch_amount || 0)}</td>
+      <td>${fmt_num(r.slip_amount || 0)}</td>
+      <td>${fmt_num(r.ads_amount || 0)}</td>
+      <td style="color:${Math.abs(r.batch_slip_diff || 0) > 1 ? "var(--bs-red)" : ""}">${fmt_num(r.batch_slip_diff || 0)}</td>
+      <td style="color:${Math.abs(r.batch_ads_diff || 0) > 1 ? "var(--bs-red)" : ""}">${fmt_num(r.batch_ads_diff || 0)}</td>
+      <td style="color:${Math.abs(r.slip_ads_diff || 0) > 1 ? "var(--bs-red)" : ""}">${fmt_num(r.slip_ads_diff || 0)}</td>
+      <td>${r.match ? `<span class="bs-status-badge bs-status-ok">OK</span>` : `<span class="bs-status-badge bs-status-fail">${frappe.utils.escape_html(r.issue || "Issue")}</span>`}</td>
+    </tr>`).join("");
+
+  const batch_arg = encodeURIComponent(frm.doc.name);
+  return `
+    <div class="bs-reconcile-panel">
+      <div class="bs-reconcile-head">
+        <div class="bs-reconcile-title">Component Reconciliation — Batch vs Slip vs ADS</div>
+        <div class="bs-reconcile-kpis">
+          <span class="bs-reconcile-kpi bs-reconcile-kpi-ok">Matched ${summary.matched || 0}</span>
+          <span class="bs-reconcile-kpi bs-reconcile-kpi-bad">Mismatch ${summary.mismatch || 0}</span>
+          <span class="bs-reconcile-kpi bs-reconcile-kpi-warn">Batch Only ${summary.batch_only || 0}</span>
+          <span class="bs-reconcile-kpi bs-reconcile-kpi-warn">Slip Only ${summary.slip_only || 0}</span>
+          <span class="bs-reconcile-kpi bs-reconcile-kpi-warn">ADS Only ${summary.ads_only || 0}</span>
+        </div>
+      </div>
+      ${mismatch_notice}
+      <div class="bs-table-scroll" style="max-height:220px">
+        <table class="bs-reconcile-table">
+          <thead><tr>
+            <th>Employee</th><th>Component</th><th>Batch</th><th>Slip</th><th>ADS</th>
+            <th>Batch−Slip</th><th>Batch−ADS</th><th>Slip−ADS</th><th>Status</th>
+          </tr></thead>
+          <tbody>${trs || `<tr><td colspan="9" style="text-align:center;color:var(--bs-muted)">No component lines to compare</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="bs-footer-row" style="margin-top:8px">
+        <button type="button" class="bs-btn-ghost bs-btn-sm" onclick="frappe.set_route('query-report','Bulk Salary Component Reconciliation', {batch: decodeURIComponent('${batch_arg}')})">Open Full Report</button>
+      </div>
+    </div>`;
+}
+
+window.bs_open_component_reconcile_report = (batch_name) => {
+  frappe.set_route("query-report", "Bulk Salary Component Reconciliation", { batch: batch_name || window._bs.frm?.doc?.name });
+};
+
 async function bs_build_reconcile_panel_html(frm) {
   const rows_with_slips = (frm.doc.employees || []).filter((r) => r.salary_slip).length;
   if (!rows_with_slips || !frm.doc.name) {
@@ -3651,7 +4075,7 @@ async function bs_build_reconcile_panel_html(frm) {
     ? `<div class="bs-notice bs-notice-warn" style="margin-bottom:10px">
         <b>${mismatch_count} issue(s)</b>${zero_count ? ` including ${zero_count} empty/zero slip(s)` : ""}.
         Do not submit drafts yet.
-        Click <b>Edit Batch</b> → Load Source → recreate draft slips with <b>Cancel and Recreate</b>.
+        Click <b>Edit Batch</b> → adjust amounts → <b>Update Draft Slips</b> (or Cancel and Recreate for submitted slips).
       </div>`
     : all_matched
       ? `<div class="bs-notice bs-notice-success" style="margin-bottom:10px">
@@ -3708,6 +4132,7 @@ window.bs_open_reconcile_report = (batch_name) => {
 
 async function render_submitted_view_content(frm, $body) {
   const reconcile_html = await bs_build_reconcile_panel_html(frm);
+  const component_reconcile_html = await bs_build_component_reconcile_panel_html(frm);
   const rows = frm.doc.employees || [];
   const draft_count = rows.filter((r) => r.salary_slip && r.salary_slip_status === "Draft").length;
   const unpaid_count = rows.filter((r) => r.salary_slip_status === "Submitted" && !r.payment_entry).length;
@@ -3865,9 +4290,11 @@ async function render_submitted_view_content(frm, $body) {
       ${kpi_html}
       ${stale_link_warning}
       ${reconcile_html}
+      ${component_reconcile_html}
       ${accounting_rows.length ? `<div class="bs-accounting-panel"><div class="bs-accounting-title">Accounting</div>${accounting_rows.join("")}</div>` : ""}
       <div class="bs-footer-row bs-mb">
         ${frm.doc.docstatus === 0 ? `<button type="button" class="bs-btn-secondary" onclick="bs_return_to_edit_mode()">✎ Edit Batch</button>` : ""}
+        ${draft_count ? `<button type="button" class="bs-btn-primary" onclick="bs_update_draft_slips()">Update Draft Slips (${draft_count})</button>` : ""}
         ${draft_count ? `<button type="button" class="bs-btn-primary" onclick="bs_submit_saved_drafts()">Submit ${draft_count} Draft${draft_count > 1 ? "s" : ""}</button>` : ""}
         ${unpaid_count ? `<button type="button" class="bs-btn-primary" onclick="bs_create_bulk_payment_completed()">Pay All (${unpaid_count})</button>` : ""}
         ${!frm.doc.accrual_journal_entry ? `<button type="button" class="bs-btn-secondary" onclick="bs_create_accrual_journal_entry()">Create Accrual JE</button>` : ""}

@@ -1,0 +1,14 @@
+{
+  "doctype": "Report",
+  "name": "Bulk Salary Component Reconciliation",
+  "report_name": "Bulk Salary Component Reconciliation",
+  "ref_doctype": "Bulk Salary Creation",
+  "report_type": "Script Report",
+  "is_standard": "Yes",
+  "module": "Payroll Bulk",
+  "roles": [
+    {"role": "System Manager"},
+    {"role": "HR Manager"},
+    {"role": "HR User"}
+  ]
+}

@@ -31,6 +31,7 @@ window.bs_tidy_form_after_ui = bs_tidy_form_after_ui;
 function bs_is_completed_batch(doc) {
   return BS_COMPLETED_STATUSES.includes(doc?.processing_status || "");
 }
+window.bs_is_completed_batch = bs_is_completed_batch;
 
 function bs_has_linked_slips(doc) {
   return (doc?.employees || []).some((row) => row.salary_slip);

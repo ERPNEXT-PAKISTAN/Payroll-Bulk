@@ -135,9 +135,11 @@ function pb_filter_source_fields(fields, kind) {
 
 function pb_sync_legacy_piece_flags(frm) {
   const basis = frm.doc.default_per_piece_basis || "Total Hours";
+  const use_hours = basis === "Total Hours" || basis === "Total Hours and Qty";
+  const use_qty = basis === "Total Qty" || basis === "Total Hours and Qty";
   frm.set_value({
-    default_use_hours: basis === "Total Hours" ? 1 : 0,
-    default_use_qty: basis === "Total Qty" ? 1 : 0,
+    default_use_hours: use_hours ? 1 : 0,
+    default_use_qty: use_qty ? 1 : 0,
   });
 }
 

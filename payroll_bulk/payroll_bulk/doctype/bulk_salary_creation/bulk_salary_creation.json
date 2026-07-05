@@ -965,7 +965,7 @@
       "fieldname": "per_piece_basis",
       "fieldtype": "Select",
       "label": "Per Piece Basis",
-      "options": "Total Hours\nTotal Qty",
+      "options": "Total Hours\nTotal Qty\nTotal Hours and Qty",
       "default": "Total Hours",
       "allow_on_submit": 1,
       "depends_on": "eval:doc.calculation_mode=='Per Piece or Per Hour'",

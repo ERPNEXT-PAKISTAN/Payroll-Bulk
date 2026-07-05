@@ -120,17 +120,18 @@ def recalculate_piece_salary(doc) -> bool:
 	if not employees:
 		return False
 
-	from payroll_bulk.api import get_bulk_source_values
+	from payroll_bulk.api import _piece_basis_use_flags, get_bulk_source_values
 
 	piece_basis = doc.get("per_piece_basis") or "Total Hours"
+	use_hours, use_qty = _piece_basis_use_flags(piece_basis)
 	imported = get_bulk_source_values(
 		employees,
 		doc.overtime_doctype,
 		doc.overtime_employee_field,
 		doc.overtime_date_field,
-		doc.overtime_hours_field or "" if piece_basis == "Total Hours" else "",
-		doc.overtime_qty_field or "" if piece_basis == "Total Qty" else "",
-		doc.overtime_rate_field or "" if piece_basis == "Total Qty" else "",
+		doc.overtime_hours_field or "" if use_hours else "",
+		doc.overtime_qty_field or "" if use_qty else "",
+		doc.overtime_rate_field or "" if use_qty else "",
 		str(start_date),
 		str(end_date),
 		doc.get("name") or "",
@@ -142,7 +143,7 @@ def recalculate_piece_salary(doc) -> bool:
 		if not employee:
 			continue
 		item = imported.get(employee) or {}
-		if piece_basis == "Total Qty":
+		if use_qty:
 			qty = float(item.get("qty") or 0)
 			rate = float(item.get("rate") or 0)
 			if float(row.get("source_qty") or 0) != qty:
@@ -151,11 +152,21 @@ def recalculate_piece_salary(doc) -> bool:
 			if float(row.get("piece_rate") or 0) != rate:
 				row.piece_rate = rate
 				changed = True
-		else:
+		if use_hours:
 			hours = float(item.get("hours") or 0)
 			if float(row.get("source_hours") or 0) != hours:
 				row.source_hours = hours
 				changed = True
+		if not use_qty:
+			if float(row.get("source_qty") or 0):
+				row.source_qty = 0
+				changed = True
+			if float(row.get("piece_rate") or 0):
+				row.piece_rate = 0
+				changed = True
+		if not use_hours and float(row.get("source_hours") or 0):
+			row.source_hours = 0
+			changed = True
 	return changed
 
 

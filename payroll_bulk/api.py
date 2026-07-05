@@ -1787,6 +1787,149 @@ def delete_bulk_salary_batch(batch_name: str):
 	)
 
 
+def _get_salary_component_row_metadata(component_name: str, company: str) -> dict:
+	if not component_name or not frappe.db.exists("Salary Component", component_name):
+		return {"abbr": (component_name or "")[:10]}
+	comp = frappe.get_cached_doc("Salary Component", component_name)
+	account = ""
+	for row in comp.accounts or []:
+		if row.company == company:
+			account = row.account or ""
+			break
+	return {
+		"abbr": comp.salary_component_abbr or component_name[:10],
+		"depends_on_payment_days": cint(comp.depends_on_payment_days),
+		"do_not_include_in_total": cint(comp.do_not_include_in_total),
+		"do_not_include_in_accounts": cint(comp.do_not_include_in_accounts),
+		"is_tax_applicable": cint(comp.is_tax_applicable),
+		"variable_based_on_taxable_salary": cint(comp.variable_based_on_taxable_salary),
+		"account": account,
+	}
+
+
+def _collect_batch_slip_component_lines(row, batch, structure_doc) -> list[dict]:
+	"""Build exact batch component lines for salary slip — batch UI = slip rows."""
+	batch_name = batch.name
+	lines_map: dict[tuple[str, str], float] = {}
+	for entry in _get_batch_component_entries(batch_name, row.name, row.employee):
+		component = (entry.salary_component or "").strip()
+		if not component:
+			continue
+		component_type = entry.component_type or "Earning"
+		lines_map[(component, component_type)] = flt(entry.amount)
+
+	calculation_mode = batch.calculation_mode or "Manual"
+	manual_salary_basis = batch.get("manual_salary_basis") or "Full Month"
+	overtime_with_salary = batch.get("overtime_with_salary") or 0
+
+	base_component = _guess_base_component(structure_doc)
+	if base_component:
+		base_key = (base_component, "Earning")
+		if base_key not in lines_map:
+			base_amount = _calculate_batch_base_amount(
+				row, calculation_mode, manual_salary_basis, overtime_with_salary
+			)
+			if base_amount > 0:
+				lines_map[base_key] = base_amount
+
+	ot_component = _resolve_overtime_component(structure_doc)
+	if ot_component and flt(row.ot_amount) > 0:
+		ot_key = (ot_component, "Earning")
+		if ot_key not in lines_map:
+			lines_map[ot_key] = flt(row.ot_amount)
+
+	if calculation_mode == "Per Piece or Per Hour":
+		hours_component = _guess_component(structure_doc, "earnings", ("hour", "overtime", "ot"))
+		qty_component = _guess_component(structure_doc, "earnings", ("qty", "piece", "quantity"))
+		hourly_rate = flt(flt(row.get("ctc")) / 30 / 8) if flt(row.get("ctc")) else 0
+		hours_amount = flt(hourly_rate * flt(row.get("source_hours")))
+		qty_amount = flt(flt(row.get("source_qty")) * flt(row.get("piece_rate")))
+		if hours_component and hours_amount > 0 and (hours_component, "Earning") not in lines_map:
+			lines_map[(hours_component, "Earning")] = hours_amount
+		if qty_component and qty_amount > 0 and qty_component != hours_component and (qty_component, "Earning") not in lines_map:
+			lines_map[(qty_component, "Earning")] = qty_amount
+
+	adv_component = _guess_component(structure_doc, "deductions", ("advance",))
+	if adv_component and flt(row.adv_deduct) > 0:
+		adv_key = (adv_component, "Deduction")
+		if adv_key not in lines_map:
+			lines_map[adv_key] = flt(row.adv_deduct)
+
+	lines = []
+	for (component, component_type), amount in sorted(lines_map.items()):
+		if flt(amount) <= 0:
+			continue
+		lines.append(
+			{
+				"salary_component": component,
+				"component_type": component_type,
+				"amount": flt(amount),
+			}
+		)
+	return lines
+
+
+def _resolve_overtime_component(structure_doc) -> str:
+	component = _guess_component(structure_doc, "earnings", ("overtime", "ot", "hour", "hourly"))
+	if component:
+		return component
+	if frappe.db.exists("DocType", "Payroll Bulk Settings"):
+		settings = frappe.get_single("Payroll Bulk Settings")
+		for rule in settings.get("component_rules") or []:
+			if not cint(rule.enabled, 1):
+				continue
+			name = (rule.salary_component or "").lower()
+			if (rule.component_type or "Earning") == "Earning" and any(
+				token in name for token in ("overtime", " ot", "hour", "hourly")
+			):
+				return rule.salary_component
+		if settings.get("overtime_component"):
+			return settings.overtime_component
+		if settings.get("hours_component"):
+			return settings.hours_component
+	if frappe.db.exists("Salary Component", "Overtime"):
+		return "Overtime"
+	return ""
+
+
+def _apply_batch_components_to_slip(slip, batch, row):
+	"""Replace salary slip earnings/deductions with exact batch component amounts."""
+	structure_doc = frappe.get_cached_doc("Salary Structure", slip.salary_structure)
+	lines = _collect_batch_slip_component_lines(row, batch, structure_doc)
+	if not lines:
+		return slip
+
+	source = frappe.copy_doc(slip)
+	source.set("earnings", [])
+	source.set("deductions", [])
+	for line in lines:
+		amount = flt(line["amount"])
+		if amount <= 0:
+			continue
+		table = "deductions" if (line.get("component_type") or "Earning") == "Deduction" else "earnings"
+		meta = _get_salary_component_row_metadata(line["salary_component"], slip.company)
+		source.append(
+			table,
+			{
+				"salary_component": line["salary_component"],
+				"abbr": meta.get("abbr") or line["salary_component"][:10],
+				"amount": amount,
+				"default_amount": amount,
+				"additional_amount": 0,
+				"depends_on_payment_days": 0,
+				"do_not_include_in_total": meta.get("do_not_include_in_total") or 0,
+				"do_not_include_in_accounts": meta.get("do_not_include_in_accounts") or 0,
+				"is_tax_applicable": meta.get("is_tax_applicable") or 0,
+				"variable_based_on_taxable_salary": meta.get("variable_based_on_taxable_salary") or 0,
+			},
+		)
+
+	source.set_totals()
+	_replace_salary_slip_rows(slip, source)
+	slip.reload()
+	return slip
+
+
 def _replace_salary_slip_rows(target_slip, source_slip):
 	for parentfield in ("earnings", "deductions"):
 		frappe.db.delete("Salary Detail", {"parent": target_slip.name, "parentfield": parentfield})
@@ -2252,6 +2395,184 @@ def _pb_money(value) -> float:
 	return round(flt(value))
 
 
+def _piece_basis_use_flags(piece_basis: str | None) -> tuple[bool, bool]:
+	basis = piece_basis or "Total Hours"
+	use_hours = basis in ("Total Hours", "Total Hours and Qty")
+	use_qty = basis in ("Total Qty", "Total Hours and Qty")
+	return use_hours, use_qty
+
+
+@frappe.whitelist()
+def get_batch_component_reconciliation(batch_name: str):
+	"""Compare batch component amounts with Salary Slip lines and Additional Salary."""
+	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
+		frappe.throw(_("Bulk Salary Creation {0} not found.").format(batch_name))
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	posting_date = batch.posting_date or batch.end_date
+	rows = []
+	summary = {
+		"total": 0,
+		"matched": 0,
+		"mismatch": 0,
+		"missing_slip": 0,
+		"batch_only": 0,
+		"slip_only": 0,
+		"ads_only": 0,
+	}
+
+	def _component_map(items):
+		mapped = {}
+		for item in items or []:
+			key = (item.get("salary_component") or item.get("component") or "", item.get("component_type") or item.get("type") or "Earning")
+			mapped[key] = mapped.get(key, 0.0) + flt(item.get("amount"))
+		return mapped
+
+	for emp_row in batch.employees:
+		if not emp_row.employee:
+			continue
+
+		batch_map = _component_map(
+			_get_batch_component_entries(batch_name, emp_row.name, emp_row.employee)
+		)
+		ads_rows = frappe.get_all(
+			"Additional Salary",
+			filters={
+				"ref_doctype": "Bulk Salary Creation",
+				"ref_docname": batch_name,
+				"employee": emp_row.employee,
+				"docstatus": 1,
+				**({"payroll_date": posting_date} if posting_date else {}),
+			},
+			fields=["salary_component", "type", "amount"],
+			limit_page_length=200,
+		)
+		ads_map = _component_map(
+			[{"salary_component": row.salary_component, "component_type": row.type, "amount": row.amount} for row in ads_rows]
+		)
+
+		slip_map = {}
+		has_slip = bool(emp_row.salary_slip and frappe.db.exists("Salary Slip", emp_row.salary_slip))
+		if has_slip:
+			slip_details = frappe.get_all(
+				"Salary Detail",
+				filters={"parent": emp_row.salary_slip, "parenttype": "Salary Slip"},
+				fields=["salary_component", "amount", "parentfield"],
+				limit_page_length=500,
+			)
+			slip_map = _component_map(
+				[
+					{
+						"salary_component": row.salary_component,
+						"component_type": "Deduction" if row.parentfield == "deductions" else "Earning",
+						"amount": row.amount,
+					}
+					for row in slip_details
+				]
+			)
+
+		all_keys = set(batch_map) | set(ads_map) | set(slip_map)
+		if not all_keys and not has_slip:
+			summary["missing_slip"] += 1
+			rows.append(
+				{
+					"employee": emp_row.employee,
+					"employee_name": emp_row.employee_name,
+					"salary_slip": "",
+					"salary_component": "",
+					"component_type": "",
+					"batch_amount": 0,
+					"slip_amount": 0,
+					"ads_amount": 0,
+					"batch_slip_diff": 0,
+					"batch_ads_diff": 0,
+					"slip_ads_diff": 0,
+					"match": False,
+					"match_label": "Issue",
+					"issue": "Missing Salary Slip",
+					"issue_type": "missing_slip",
+				}
+			)
+			summary["total"] += 1
+			continue
+
+		for key in sorted(all_keys):
+			component, component_type = key
+			if not component:
+				continue
+			batch_amount = flt(batch_map.get(key))
+			ads_amount = flt(ads_map.get(key))
+			slip_amount = flt(slip_map.get(key))
+			batch_slip_diff = batch_amount - slip_amount
+			batch_ads_diff = batch_amount - ads_amount
+			slip_ads_diff = slip_amount - ads_amount
+
+			match = (
+				has_slip
+				and abs(batch_slip_diff) <= RECONCILE_TOLERANCE
+				and abs(batch_ads_diff) <= RECONCILE_TOLERANCE
+				and abs(slip_ads_diff) <= RECONCILE_TOLERANCE
+			)
+			issue = ""
+			issue_type = "matched"
+			if not has_slip:
+				match = False
+				issue = "Missing Salary Slip"
+				issue_type = "missing_slip"
+			elif batch_amount <= RECONCILE_TOLERANCE and slip_amount <= RECONCILE_TOLERANCE and ads_amount <= RECONCILE_TOLERANCE:
+				match = True
+				issue = ""
+				issue_type = "matched"
+			elif match:
+				issue = ""
+			elif batch_amount > RECONCILE_TOLERANCE and slip_amount <= RECONCILE_TOLERANCE and ads_amount <= RECONCILE_TOLERANCE:
+				issue = "Batch only — not on slip or ADS"
+				issue_type = "batch_only"
+			elif slip_amount > RECONCILE_TOLERANCE and batch_amount <= RECONCILE_TOLERANCE:
+				issue = "Slip only — missing on batch"
+				issue_type = "slip_only"
+			elif ads_amount > RECONCILE_TOLERANCE and batch_amount <= RECONCILE_TOLERANCE:
+				issue = "ADS only — missing on batch"
+				issue_type = "ads_only"
+			else:
+				issue = "Component amount mismatch"
+				issue_type = "mismatch"
+
+			item = {
+				"employee": emp_row.employee,
+				"employee_name": emp_row.employee_name,
+				"salary_slip": emp_row.salary_slip or "",
+				"salary_component": component,
+				"component_type": component_type,
+				"batch_amount": batch_amount,
+				"slip_amount": slip_amount,
+				"ads_amount": ads_amount,
+				"batch_slip_diff": batch_slip_diff,
+				"batch_ads_diff": batch_ads_diff,
+				"slip_ads_diff": slip_ads_diff,
+				"match": match,
+				"match_label": "Matched" if match else "Issue",
+				"issue": issue,
+				"issue_type": issue_type,
+			}
+			rows.append(item)
+			summary["total"] += 1
+			if match:
+				summary["matched"] += 1
+			elif issue_type == "missing_slip":
+				summary["missing_slip"] += 1
+			elif issue_type == "batch_only":
+				summary["batch_only"] += 1
+			elif issue_type == "slip_only":
+				summary["slip_only"] += 1
+			elif issue_type == "ads_only":
+				summary["ads_only"] += 1
+			else:
+				summary["mismatch"] += 1
+
+	return {"rows": rows, "summary": summary, "batch_name": batch_name}
+
+
 @frappe.whitelist()
 def get_batch_slip_reconciliation(batch_name: str):
 	"""Compare batch employee row totals with linked Salary Slip amounts."""
@@ -2503,58 +2824,16 @@ def sync_bulk_row_additional_salaries(
 		frappe.throw(_("Employee row {0} does not belong to batch {1}.").format(row_name, batch_name))
 
 	batch = frappe.get_cached_doc("Bulk Salary Creation", batch_name)
-	calculation_mode = batch.calculation_mode or "Manual"
-	manual_salary_basis = batch.get("manual_salary_basis") or "Full Month"
-	overtime_with_salary = batch.get("overtime_with_salary") or 0
 	assignment = _get_salary_structure_assignment(row.employee, payroll_frequency, start_date, end_date)
 	structure_doc = frappe.get_cached_doc("Salary Structure", assignment.salary_structure)
 
-	_create_base_additional_salary_if_needed(
-		row,
-		assignment,
-		company,
-		start_date,
-		end_date,
-		posting_date,
-		batch_name,
-		calculation_mode,
-		manual_salary_basis,
-		overtime_with_salary,
-	)
-	if calculation_mode == "Per Piece or Per Hour":
-		_sync_piece_additional_salaries(
-			row, batch, structure_doc, company, start_date, end_date, posting_date, batch_name
-		)
-	else:
+	for line in _collect_batch_slip_component_lines(row, batch, structure_doc):
 		_upsert_additional_salary(
 			row,
 			company,
-			_guess_component(structure_doc, "earnings", ("overtime", "ot")),
-			"Earning",
-			row.ot_amount,
-			start_date,
-			end_date,
-			posting_date,
-			batch_name,
-		)
-	_upsert_additional_salary(
-		row,
-		company,
-		_guess_component(structure_doc, "deductions", ("advance",)),
-		"Deduction",
-		row.adv_deduct,
-		start_date,
-		end_date,
-		posting_date,
-		batch_name,
-	)
-	for component_row in _get_batch_component_entries(batch_name, row_name, row.employee):
-		_upsert_additional_salary(
-			row,
-			company,
-			component_row.salary_component,
-			component_row.component_type or "Earning",
-			component_row.amount,
+			line["salary_component"],
+			line["component_type"] or "Earning",
+			line["amount"],
 			start_date,
 			end_date,
 			posting_date,
@@ -2674,14 +2953,8 @@ def create_bulk_salary_slip(
 		if "ignore_permissions" not in str(error):
 			raise
 		slip = make_salary_slip(assignment.salary_structure, **make_salary_slip_kwargs)
-	preview_slip = frappe.copy_doc(slip)
-	preview_earnings_count = len(preview_slip.get("earnings") or [])
-	preview_deductions_count = len(preview_slip.get("deductions") or [])
 	slip.insert(ignore_permissions=True)
-	if len(slip.get("earnings") or []) != preview_earnings_count or len(
-		slip.get("deductions") or []
-	) != preview_deductions_count:
-		_replace_salary_slip_rows(slip, preview_slip)
+	slip = _apply_batch_components_to_slip(slip, batch, row)
 
 	if cint(submit_slip):
 		try:
@@ -2714,6 +2987,295 @@ def create_bulk_salary_slip(
 		"earnings_count": len(slip.earnings or []),
 		"deductions_count": len(slip.deductions or []),
 	}
+
+
+def _resolve_draft_slip_for_update(
+	row,
+	batch_name: str,
+	company: str,
+	start_date: str,
+	end_date: str,
+	row_name: str,
+) -> tuple[str | None, str]:
+	slip_name = row.salary_slip
+	if not slip_name:
+		resolved = _resolve_existing_salary_slip(
+			row.employee, company, start_date, end_date, batch_name, row_name
+		)
+		slip_name = resolved.get("name")
+	if not slip_name or not frappe.db.exists("Salary Slip", slip_name):
+		return None, _("No draft Salary Slip linked for {0}.").format(row.employee)
+
+	slip = frappe.db.get_value(
+		"Salary Slip",
+		slip_name,
+		["bulk_salary_creation", "docstatus", "employee"],
+		as_dict=True,
+	)
+	if not slip:
+		return None, _("Salary Slip {0} not found.").format(slip_name)
+	if slip.employee != row.employee:
+		return None, _("Salary Slip {0} belongs to another employee.").format(slip_name)
+	if cint(slip.docstatus) == 1:
+		return None, _("Salary Slip {0} is submitted. Cancel it first or use Cancel and Recreate.").format(
+			slip_name
+		)
+	if cint(slip.docstatus) == 2:
+		return None, _("Salary Slip {0} is cancelled.").format(slip_name)
+	if slip.bulk_salary_creation and slip.bulk_salary_creation != batch_name:
+		return None, _("Salary Slip {0} belongs to batch {1}.").format(slip_name, slip.bulk_salary_creation)
+	return slip_name, ""
+
+
+def _format_bulk_update_error(exc: Exception) -> str:
+	message = str(exc)
+	if "1020" in message and "changed since last read" in message.lower():
+		return _("Batch record changed during update. Reload the batch and try again.")
+	match = frappe.utils.cstr(message).split(', "', 1)
+	if len(match) == 2 and match[1].endswith('")'):
+		return match[1][:-2]
+	return message
+
+
+def _get_slip_component_amounts(slip_name: str) -> dict[tuple[str, str], float]:
+	amounts: dict[tuple[str, str], float] = {}
+	if not slip_name or not frappe.db.exists("Salary Slip", slip_name):
+		return amounts
+	for row in frappe.get_all(
+		"Salary Detail",
+		filters={"parent": slip_name},
+		fields=["salary_component", "amount", "parentfield"],
+		limit_page_length=500,
+	):
+		component_type = "Deduction" if row.parentfield == "deductions" else "Earning"
+		key = (row.salary_component, component_type)
+		amounts[key] = amounts.get(key, 0.0) + flt(row.amount)
+	return amounts
+
+
+def _build_slip_update_changes(before: dict, after: dict) -> list[dict]:
+	changes = []
+	for key in sorted(set(before) | set(after)):
+		component, component_type = key
+		before_amount = flt(before.get(key))
+		after_amount = flt(after.get(key))
+		if abs(before_amount - after_amount) <= RECONCILE_TOLERANCE:
+			continue
+		changes.append(
+			{
+				"salary_component": component,
+				"component_type": component_type,
+				"before": before_amount,
+				"after": after_amount,
+				"diff": after_amount - before_amount,
+			}
+		)
+	return changes
+
+
+def _update_bulk_draft_salary_slip_internal(
+	batch_name: str,
+	row_name: str,
+	update_batch_summary: bool = True,
+	sync_additional_salaries: bool = False,
+):
+	frappe.clear_document_cache("Bulk Salary Creation", batch_name)
+	frappe.clear_document_cache("Bulk Salary Creation Employee", row_name)
+
+	row = frappe.get_doc("Bulk Salary Creation Employee", row_name)
+	if row.parent != batch_name:
+		frappe.throw(_("Employee row {0} does not belong to batch {1}.").format(row_name, batch_name))
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	validate_batch_period_dates(batch.start_date, batch.end_date, batch.posting_date, batch.get("month"))
+
+	slip_name, error = _resolve_draft_slip_for_update(
+		row,
+		batch_name,
+		batch.company,
+		batch.start_date,
+		batch.end_date,
+		row_name,
+	)
+	if not slip_name:
+		frappe.throw(error)
+
+	before_slip = frappe.get_doc("Salary Slip", slip_name)
+	before_components = _get_slip_component_amounts(slip_name)
+	before_gross = flt(before_slip.gross_pay)
+	before_net = flt(before_slip.net_pay)
+
+	options = {
+		"start_date": batch.start_date,
+		"end_date": batch.end_date,
+		"posting_date": batch.posting_date,
+	}
+	_ensure_row_attendance_loaded(row, batch, options)
+	_ensure_row_manual_payment_days(row, batch)
+	row.reload()
+	batch.reload()
+	_validate_row_source_days(row, batch, batch.start_date, batch.end_date)
+
+	if sync_additional_salaries:
+		sync_bulk_row_additional_salaries(
+			batch_name=batch_name,
+			row_name=row_name,
+			company=batch.company,
+			start_date=batch.start_date,
+			end_date=batch.end_date,
+			posting_date=batch.posting_date,
+			payroll_frequency=batch.payroll_frequency or "Monthly",
+		)
+
+	slip = frappe.get_doc("Salary Slip", slip_name)
+	slip = _apply_batch_components_to_slip(slip, batch, row)
+	after_components = _get_slip_component_amounts(slip.name)
+	changes = _build_slip_update_changes(before_components, after_components)
+
+	frappe.db.set_value(
+		"Bulk Salary Creation Employee",
+		row_name,
+		{
+			"salary_slip": slip.name,
+			"salary_slip_status": "Draft",
+			"status": "Slip Created",
+			"gross_pay": slip.gross_pay,
+			"net_pay": slip.net_pay,
+			"error_message": "",
+		},
+		update_modified=False,
+	)
+
+	if update_batch_summary:
+		from payroll_bulk.events.salary_slip import _update_batch_summary
+
+		_update_batch_summary(batch_name)
+
+	return {
+		"name": slip.name,
+		"salary_slip": slip.name,
+		"docstatus": slip.docstatus,
+		"status": slip.status,
+		"gross_pay": slip.gross_pay,
+		"net_pay": slip.net_pay,
+		"before_gross": before_gross,
+		"after_gross": flt(slip.gross_pay),
+		"before_net": before_net,
+		"after_net": flt(slip.net_pay),
+		"earnings_count": len(slip.earnings or []),
+		"deductions_count": len(slip.deductions or []),
+		"employee": row.employee,
+		"employee_name": row.employee_name or row.employee,
+		"changes": changes,
+		"unchanged": not changes and abs(before_gross - flt(slip.gross_pay)) <= RECONCILE_TOLERANCE and abs(before_net - flt(slip.net_pay)) <= RECONCILE_TOLERANCE,
+		"updated": True,
+	}
+
+
+@frappe.whitelist()
+def update_bulk_draft_salary_slip(batch_name: str, row_name: str):
+	"""Push current batch component amounts into an existing draft Salary Slip."""
+	if not batch_name or not row_name:
+		frappe.throw(_("Batch and employee row are required."))
+	return _update_bulk_draft_salary_slip_internal(
+		batch_name,
+		row_name,
+		update_batch_summary=True,
+		sync_additional_salaries=False,
+	)
+
+
+@frappe.whitelist()
+def update_bulk_draft_slips(batch_name: str, row_names: str | list | None = None):
+	"""Update all (or selected) draft salary slips from current batch data without cancel/delete."""
+	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
+		frappe.throw(_("Bulk Salary Creation {0} not found.").format(batch_name))
+
+	if isinstance(row_names, str):
+		row_names = frappe.parse_json(row_names) if row_names.strip().startswith("[") else [row_names]
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	target_rows = [row for row in batch.employees if row.employee]
+	if row_names:
+		row_names = set(row_names)
+		target_rows = [row for row in target_rows if row.name in row_names]
+	else:
+		target_rows = [
+			row
+			for row in target_rows
+			if row.salary_slip
+			and frappe.db.get_value("Salary Slip", row.salary_slip, "docstatus") == 0
+		]
+
+	results = {"updated": [], "skipped": [], "failed": []}
+	for row in target_rows:
+		slip_name, error = _resolve_draft_slip_for_update(
+			row,
+			batch_name,
+			batch.company,
+			batch.start_date,
+			batch.end_date,
+			row.name,
+		)
+		if not slip_name:
+			skip_item = {
+				"employee": row.employee,
+				"employee_name": row.employee_name or row.employee,
+				"reason": error or _("No draft slip to update"),
+			}
+			if row.salary_slip and frappe.db.get_value("Salary Slip", row.salary_slip, "docstatus") == 1:
+				results["skipped"].append(skip_item)
+			elif not row.salary_slip:
+				results["skipped"].append(skip_item)
+			else:
+				results["failed"].append({**skip_item, "error": skip_item["reason"]})
+			continue
+
+		last_error = ""
+		updated_item = None
+		for attempt in range(2):
+			try:
+				frappe.clear_document_cache("Bulk Salary Creation", batch_name)
+				updated_item = _update_bulk_draft_salary_slip_internal(
+					batch_name,
+					row.name,
+					update_batch_summary=False,
+					sync_additional_salaries=False,
+				)
+				last_error = ""
+				break
+			except Exception as exc:
+				last_error = _format_bulk_update_error(exc)
+				if "1020" in str(exc) and attempt == 0:
+					frappe.db.rollback()
+					continue
+				break
+
+		if updated_item:
+			results["updated"].append(updated_item)
+		else:
+			results["failed"].append(
+				{
+					"employee": row.employee,
+					"employee_name": row.employee_name or row.employee,
+					"error": last_error or _("Update failed"),
+				}
+			)
+
+	if results["updated"]:
+		from payroll_bulk.events.salary_slip import _update_batch_summary
+
+		_update_batch_summary(batch_name)
+
+	results["summary"] = {
+		"total": len(target_rows),
+		"updated_count": len(results["updated"]),
+		"failed_count": len(results["failed"]),
+		"skipped_count": len(results["skipped"]),
+		"unchanged_count": sum(1 for item in results["updated"] if item.get("unchanged")),
+	}
+	frappe.db.commit()
+	return results
 
 
 @frappe.whitelist()
