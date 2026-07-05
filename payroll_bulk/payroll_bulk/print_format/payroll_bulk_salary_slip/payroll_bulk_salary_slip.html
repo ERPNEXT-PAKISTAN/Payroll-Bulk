@@ -1,37 +1,36 @@
 <style>
 	.pb-slip {
-		font-family: "Segoe UI", Arial, sans-serif;
+		font-family: Arial, sans-serif;
 		color: #1e293b;
-		max-width: 820px;
+		max-width: 780px;
 		margin: 0 auto;
-		border: 1px solid #cbd5e1;
-		padding: 18px 20px 22px;
+		padding: 12px 14px 16px;
 		background: #fff;
 	}
 	.pb-slip .company {
 		text-align: center;
-		font-size: 26px;
+		font-size: 22px;
 		font-weight: 700;
-		margin: 0 0 10px;
+		margin: 0 0 6px;
 		color: #334155;
-		letter-spacing: 0.2px;
 	}
 	.pb-slip .title-bar {
-		background: #cbd5e1;
-		color: #1e293b;
+		background: #dbeafe;
+		color: #1e3a5f;
 		text-align: center;
-		font-size: 17px;
+		font-size: 14px;
 		font-weight: 700;
-		padding: 9px 12px;
-		margin-bottom: 14px;
-		border-radius: 2px;
+		padding: 5px 8px;
+		margin-bottom: 10px;
+		border: 1px solid #bfdbfe;
 	}
 	.pb-slip .section-title {
 		background: #e2e8f0;
 		color: #334155;
 		font-weight: 700;
-		padding: 7px 12px;
+		padding: 4px 8px;
 		margin: 0;
+		font-size: 11px;
 		border: 1px solid #cbd5e1;
 		border-bottom: none;
 	}
@@ -40,100 +39,102 @@
 		border-collapse: collapse;
 	}
 	.pb-slip .info-table {
-		margin-bottom: 14px;
+		margin-bottom: 10px;
 	}
 	.pb-slip .info-table td {
-		border: 1px solid #cbd5e1;
-		padding: 8px 12px;
-		font-size: 12px;
-		line-height: 1.45;
+		border: 1px solid #d1d5db;
+		padding: 3px 7px;
+		font-size: 10px;
+		line-height: 1.2;
 		vertical-align: middle;
+		background: #fff;
 	}
 	.pb-slip .info-label {
 		width: 22%;
-		background: #f1f5f9;
 		font-weight: 600;
 		color: #475569;
 	}
 	.pb-slip .info-value {
 		width: 28%;
-		background: #f8fafc;
+		color: #1e293b;
 	}
-	.pb-slip .split {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 14px;
-		align-items: stretch;
-		margin-bottom: 14px;
-	}
-	.pb-slip .box-table {
-		height: 100%;
+	.pb-slip .ledger-table {
+		margin-bottom: 10px;
 		border: 1px solid #cbd5e1;
 	}
-	.pb-slip .box-table thead th {
-		background: #94a3b8;
-		color: #fff;
+	.pb-slip .ledger-table thead th {
+		background: #cbd5e1;
+		color: #1e293b;
 		text-align: left;
 		font-weight: 700;
-		padding: 8px 12px;
-		font-size: 12px;
+		padding: 4px 7px;
+		font-size: 10px;
 		border: 1px solid #94a3b8;
 	}
-	.pb-slip .box-table tbody td {
-		border: 1px solid #e2e8f0;
-		padding: 8px 12px;
-		font-size: 12px;
-		line-height: 1.45;
+	.pb-slip .ledger-table tbody td {
+		border: 1px solid #e5e7eb;
+		padding: 2px 7px;
+		font-size: 10px;
+		line-height: 1.15;
 		vertical-align: middle;
 		background: #fff;
+		height: 18px;
 	}
-	.pb-slip .box-table tbody td.amt {
+	.pb-slip .ledger-table tbody td.amt {
 		text-align: right;
-		width: 38%;
 		white-space: nowrap;
-		color: #334155;
+		width: 18%;
 	}
-	.pb-slip .box-table tfoot td {
-		border: 1px solid #64748b;
-		padding: 9px 12px;
-		font-size: 12px;
+	.pb-slip .ledger-table tfoot td {
+		border: 1px solid #94a3b8;
+		padding: 4px 7px;
+		font-size: 10px;
 		font-weight: 700;
-		background: #64748b;
-		color: #fff;
+		background: #cbd5e1;
+		color: #1e293b;
 	}
-	.pb-slip .box-table tfoot td.amt {
+	.pb-slip .ledger-table tfoot td.amt {
 		text-align: right;
 	}
 	.pb-slip .net-box {
-		display: flex;
-		border: 2px solid #93c5fd;
-		border-radius: 2px;
-		overflow: hidden;
-		margin-top: 4px;
+		display: table;
+		width: 100%;
+		border: 1px solid #93c5fd;
+		margin-top: 2px;
 	}
-	.pb-slip .net-label {
-		flex: 1;
-		background: #eff6ff;
-		color: #1e40af;
-		font-size: 17px;
+	.pb-slip .net-row {
+		display: table-row;
+	}
+	.pb-slip .net-label,
+	.pb-slip .net-value {
+		display: table-cell;
+		padding: 6px 10px;
+		font-size: 13px;
 		font-weight: 700;
-		padding: 14px 16px;
+		color: #1e40af;
+		background: #fff;
+		vertical-align: middle;
 	}
 	.pb-slip .net-value {
-		flex: 1;
 		text-align: right;
-		font-size: 22px;
-		font-weight: 700;
-		color: #1e40af;
-		padding: 14px 16px;
-		background: #fff;
+		font-size: 16px;
 	}
 	.pb-slip .footer-note {
-		margin-top: 16px;
-		font-size: 11px;
+		margin-top: 10px;
+		font-size: 9px;
 		color: #64748b;
 		font-style: italic;
 		text-align: center;
+	}
+	@media print {
+		.pb-slip { max-width: none; padding: 0; border: none; }
+		.pb-slip .title-bar,
+		.pb-slip .section-title,
+		.pb-slip .ledger-table thead th,
+		.pb-slip .ledger-table tfoot td {
+			-webkit-print-color-adjust: exact;
+			print-color-adjust: exact;
+		}
 	}
 </style>
 {% set earnings = doc.earnings or [] %}
@@ -171,50 +172,44 @@
 		</tr>
 	</table>
 
-	<div class="split">
-		<div>
-			<table class="box-table earn">
-				<thead><tr><th colspan="2">{{ _("Earnings") }}</th></tr></thead>
-				<tbody>
-					{% for i in range(max_rows) %}
-					<tr>
-						<td>{% if i < earnings|length %}{{ earnings[i].salary_component }}{% endif %}</td>
-						<td class="amt">{% if i < earnings|length %}{{ frappe.utils.fmt_money(earnings[i].amount, currency=doc.currency) }}{% endif %}</td>
-					</tr>
-					{% endfor %}
-				</tbody>
-				<tfoot>
-					<tr>
-						<td>{{ _("Gross Earnings") }}</td>
-						<td class="amt">{{ frappe.utils.fmt_money(doc.gross_pay, currency=doc.currency) }}</td>
-					</tr>
-				</tfoot>
-			</table>
-		</div>
-		<div>
-			<table class="box-table ded">
-				<thead><tr><th colspan="2">{{ _("Deductions") }}</th></tr></thead>
-				<tbody>
-					{% for i in range(max_rows) %}
-					<tr>
-						<td>{% if i < deductions|length %}{{ deductions[i].salary_component }}{% endif %}</td>
-						<td class="amt">{% if i < deductions|length %}{{ frappe.utils.fmt_money(deductions[i].amount, currency=doc.currency) }}{% endif %}</td>
-					</tr>
-					{% endfor %}
-				</tbody>
-				<tfoot>
-					<tr>
-						<td>{{ _("Total Deductions") }}</td>
-						<td class="amt">{{ frappe.utils.fmt_money(doc.total_deduction, currency=doc.currency) }}</td>
-					</tr>
-				</tfoot>
-			</table>
-		</div>
-	</div>
+	<table class="ledger-table">
+		<colgroup>
+			<col style="width:32%">
+			<col style="width:18%">
+			<col style="width:32%">
+			<col style="width:18%">
+		</colgroup>
+		<thead>
+			<tr>
+				<th colspan="2">{{ _("Earnings") }}</th>
+				<th colspan="2">{{ _("Deductions") }}</th>
+			</tr>
+		</thead>
+		<tbody>
+			{% for i in range(max_rows) %}
+			<tr>
+				<td>{% if i < earnings|length %}{{ earnings[i].salary_component }}{% endif %}</td>
+				<td class="amt">{% if i < earnings|length %}{{ frappe.utils.fmt_money(earnings[i].amount, currency=doc.currency) }}{% endif %}</td>
+				<td>{% if i < deductions|length %}{{ deductions[i].salary_component }}{% endif %}</td>
+				<td class="amt">{% if i < deductions|length %}{{ frappe.utils.fmt_money(deductions[i].amount, currency=doc.currency) }}{% endif %}</td>
+			</tr>
+			{% endfor %}
+		</tbody>
+		<tfoot>
+			<tr>
+				<td>{{ _("Gross Earnings") }}</td>
+				<td class="amt">{{ frappe.utils.fmt_money(doc.gross_pay, currency=doc.currency) }}</td>
+				<td>{{ _("Total Deductions") }}</td>
+				<td class="amt">{{ frappe.utils.fmt_money(doc.total_deduction, currency=doc.currency) }}</td>
+			</tr>
+		</tfoot>
+	</table>
 
 	<div class="net-box">
-		<div class="net-label">{{ _("Net Salary Payable") }}</div>
-		<div class="net-value">{{ frappe.utils.fmt_money(doc.net_pay, currency=doc.currency) }}</div>
+		<div class="net-row">
+			<div class="net-label">{{ _("Net Salary Payable") }}</div>
+			<div class="net-value">{{ frappe.utils.fmt_money(doc.net_pay, currency=doc.currency) }}</div>
+		</div>
 	</div>
 
 	<div class="footer-note">{{ _("This is a computer-generated salary slip and does not require a signature.") }}</div>

@@ -37,6 +37,12 @@ def download_register_pdf(filters=None):
 		{
 			"orientation": "Landscape",
 			"page-size": "A4",
+			"margin-top": "6mm",
+			"margin-bottom": "6mm",
+			"margin-left": "5mm",
+			"margin-right": "5mm",
+			"disable-smart-shrinking": "",
+			"print-media-type": "",
 		},
 	)
 	frappe.local.response.type = "pdf"
@@ -252,8 +258,46 @@ def _base_columns(earning_components, deduction_components):
 	return columns
 
 
+def _register_col_width_pct(fieldname, fieldtype):
+	weights = {
+		"si_no": 2.5,
+		"employee_name": 11,
+		"batch": 7,
+		"period": 8,
+		"gross_pay": 5.5,
+		"total_deductions": 5.5,
+		"net_pay": 5.5,
+	}
+	if fieldname in weights:
+		return weights[fieldname]
+	if fieldtype == "Currency":
+		return 5
+	if fieldtype == "Int":
+		return 2.5
+	return 6
+
+
+def _register_print_styles(print_columns):
+	col_count = len(print_columns)
+	if col_count <= 12:
+		font_size, cell_pad = "9px", "3px 4px"
+	elif col_count <= 16:
+		font_size, cell_pad = "8px", "2px 3px"
+	else:
+		font_size, cell_pad = "7px", "2px 3px"
+
+	weights = [_register_col_width_pct(col.get("fieldname"), col.get("fieldtype")) for col in print_columns]
+	total_weight = sum(weights) or 1
+	col_styles = "".join(
+		f'<col style="width:{weight / total_weight * 100:.2f}%">' for weight in weights
+	)
+
+	return font_size, cell_pad, col_styles
+
+
 def _render_register_print_html(columns, data, period_label, currency, auto_print=False):
 	print_columns = [column for column in columns if column.get("fieldname") not in ("company", "payroll_frequency")]
+	font_size, cell_pad, col_styles = _register_print_styles(print_columns)
 	header = "".join(f"<th>{frappe.utils.escape_html(column.get('label') or '')}</th>" for column in print_columns)
 	body_rows = []
 	for row in data:
@@ -265,6 +309,8 @@ def _render_register_print_html(columns, data, period_label, currency, auto_prin
 			if column.get("fieldtype") == "Currency" and value not in (None, ""):
 				display = frappe.format_value(value, {"fieldtype": "Currency", "options": currency, "precision": 0})
 				cells.append(f'<td class="num">{frappe.utils.escape_html(display)}</td>')
+			elif fieldname == "employee_name" and row_class in ("department", "subtotal", "grand_total"):
+				cells.append(f'<td class="text bold" colspan="1">{frappe.utils.escape_html(str(value))}</td>')
 			elif value not in (None, ""):
 				cells.append(f'<td class="text">{frappe.utils.escape_html(str(value))}</td>')
 			else:
@@ -276,19 +322,97 @@ def _render_register_print_html(columns, data, period_label, currency, auto_prin
 	return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{frappe.utils.escape_html(_("Bulk Salary Register"))}</title>
 <style>
-	body {{ font-family: Arial, sans-serif; color: #111; font-size: 11px; margin: 16px; }}
-	h2, h4 {{ text-align: center; margin: 0 0 8px; }}
-	table {{ width: 100%; border-collapse: collapse; }}
-	th, td {{ border: 1px solid #222; padding: 5px 7px; line-height: 1.4; }}
-	th {{ background: #e2e8f0; }}
-	td.num {{ text-align: right; }}
-	td.text {{ text-align: left; }}
-	tr.department td {{ background: #f1f5f9; font-weight: 700; }}
-	tr.subtotal td, tr.grand_total td {{ background: #f8fafc; font-weight: 700; }}
-	tr.grand_total td {{ background: #cbd5e1; }}
+	@page {{
+		size: A4 landscape;
+		margin: 6mm 5mm;
+	}}
+	* {{ box-sizing: border-box; }}
+	body {{
+		font-family: Arial, sans-serif;
+		color: #111;
+		font-size: {font_size};
+		margin: 0;
+		padding: 4px 6px;
+	}}
+	h2 {{
+		text-align: center;
+		margin: 0 0 4px;
+		font-size: 14px;
+	}}
+	h4 {{
+		text-align: center;
+		margin: 0 0 8px;
+		font-size: 10px;
+		font-weight: normal;
+		color: #333;
+	}}
+	.register-wrap {{
+		width: 100%;
+		overflow: hidden;
+	}}
+	table.register {{
+		width: 100%;
+		border-collapse: collapse;
+		table-layout: fixed;
+	}}
+	table.register th,
+	table.register td {{
+		border: 1px solid #333;
+		padding: {cell_pad};
+		line-height: 1.15;
+		vertical-align: middle;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		word-wrap: break-word;
+	}}
+	table.register th {{
+		background: #dbeafe;
+		font-weight: 700;
+		text-align: center;
+		white-space: normal;
+	}}
+	td.num {{
+		text-align: right;
+		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
+	}}
+	td.text {{
+		text-align: left;
+	}}
+	td.bold {{
+		font-weight: 700;
+	}}
+	tr.department td {{
+		background: #f1f5f9;
+		font-weight: 700;
+	}}
+	tr.subtotal td {{
+		background: #f8fafc;
+		font-weight: 700;
+	}}
+	tr.grand_total td {{
+		background: #cbd5e1;
+		font-weight: 700;
+	}}
+	@media print {{
+		body {{ padding: 0; }}
+		table.register th,
+		tr.department td,
+		tr.subtotal td,
+		tr.grand_total td {{
+			-webkit-print-color-adjust: exact;
+			print-color-adjust: exact;
+		}}
+	}}
 </style></head><body>
 <h2>{frappe.utils.escape_html(_("Bulk Salary Register"))}</h2>
 <h4>{frappe.utils.escape_html(period_label or "")}</h4>
-<table><thead><tr>{header}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>
+<div class="register-wrap">
+<table class="register">
+<colgroup>{col_styles}</colgroup>
+<thead><tr>{header}</tr></thead>
+<tbody>{"".join(body_rows)}</tbody>
+</table>
+</div>
 {print_script}
 </body></html>"""
