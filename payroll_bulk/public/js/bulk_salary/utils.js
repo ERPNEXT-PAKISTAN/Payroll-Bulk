@@ -494,7 +494,8 @@ function inject_bs_styles() {
     .bs-notice-warn{background:var(--bs-amber-dim);border:1px solid #fcd34d;color:var(--bs-amber)}
     .bs-notice-success{background:var(--bs-green-dim);border:1px solid #86efac;color:var(--bs-green)}
     .bs-notice-info{background:var(--bs-primary-soft);border:1px solid #bfdbfe;color:var(--bs-primary-deep)}
-    .bs-notice-error{background:var(--bs-red-dim);border:1px solid #fca5a5;color:var(--bs-red)}
+    .bs-btn-danger-outline{border-color:#fca5a5;color:var(--bs-red);background:#fff}
+    .bs-btn-danger-outline:hover{background:var(--bs-red-dim)}
     .bs-linked-docs{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
     .bs-link-chip{display:inline-flex;align-items:center;border:1px solid var(--bs-border);background:#fff;border-radius:999px;padding:1px 7px;font-size:10px;color:var(--bs-muted);cursor:pointer}
     .bs-link-chip-warn{border-color:#fcd34d;background:var(--bs-amber-dim);color:var(--bs-amber)}

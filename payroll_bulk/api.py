@@ -1637,6 +1637,156 @@ def unlink_bulk_salary_slip(batch_name: str, row_name: str, action: str = "unlin
 	return {"ok": True, "message": _("Salary Slip link updated."), "action": action, "salary_slip": slip.name}
 
 
+def _cancel_doc_if_active(doctype: str, name: str) -> bool:
+	if not name or not frappe.db.exists(doctype, name):
+		return False
+	doc = frappe.get_doc(doctype, name)
+	if doc.docstatus == 1:
+		doc.cancel()
+		return True
+	if doc.docstatus == 0:
+		frappe.delete_doc(doctype, name, force=1, ignore_permissions=True)
+		return True
+	return False
+
+
+def _batch_owns_accrual_journal(batch_name: str, journal_entry: str) -> bool:
+	if not batch_name or not journal_entry:
+		return False
+	slips = frappe.get_all(
+		"Salary Slip",
+		filters={"journal_entry": journal_entry, "docstatus": ["<", 2]},
+		fields=["name", "bulk_salary_creation"],
+		limit_page_length=500,
+	)
+	if not slips:
+		return frappe.db.get_value("Bulk Salary Creation", batch_name, "accrual_journal_entry") == journal_entry
+	return all((slip.bulk_salary_creation or batch_name) == batch_name for slip in slips)
+
+
+def _clear_slip_journal_entry_references(journal_entry: str):
+	if not journal_entry:
+		return
+	for slip_name in frappe.get_all(
+		"Salary Slip", filters={"journal_entry": journal_entry}, pluck="name", limit_page_length=500
+	):
+		frappe.db.set_value("Salary Slip", slip_name, "journal_entry", None, update_modified=False)
+
+
+@frappe.whitelist()
+def reset_bulk_salary_batch(
+	batch_name: str,
+	cancel_accrual: int | bool = 1,
+	cancel_payments: int | bool = 1,
+	delete_batch: int | bool = 0,
+):
+	"""Cancel/unlink all payroll documents created from a bulk batch and reset rows."""
+	from payroll_bulk.events.salary_slip import _update_batch_summary
+
+	if not batch_name or not frappe.db.exists("Bulk Salary Creation", batch_name):
+		frappe.throw(_("Bulk Salary Creation {0} not found.").format(batch_name))
+
+	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
+	results = {
+		"batch_name": batch_name,
+		"cancelled_slips": [],
+		"unlinked_slips": [],
+		"cancelled_additional_salaries": 0,
+		"cancelled_journal_entries": [],
+		"cleared_accrual_reference": False,
+		"deleted_batch": False,
+	}
+
+	if cint(cancel_payments):
+		payment_jes = set()
+		if batch.get("bulk_payment_entry"):
+			payment_jes.add(batch.bulk_payment_entry)
+		for row in batch.employees:
+			if row.payment_entry:
+				payment_jes.add(row.payment_entry)
+		for je_name in payment_jes:
+			if _cancel_doc_if_active("Journal Entry", je_name):
+				results["cancelled_journal_entries"].append(je_name)
+		batch.db_set("bulk_payment_entry", "")
+
+	accrual_je = batch.get("accrual_journal_entry")
+	if accrual_je and cint(cancel_accrual):
+		if _batch_owns_accrual_journal(batch_name, accrual_je):
+			_clear_slip_journal_entry_references(accrual_je)
+			if _cancel_doc_if_active("Journal Entry", accrual_je):
+				results["cancelled_journal_entries"].append(accrual_je)
+			for other_batch in frappe.get_all(
+				"Bulk Salary Creation",
+				filters={"accrual_journal_entry": accrual_je, "name": ["!=", batch_name]},
+				pluck="name",
+			):
+				frappe.db.set_value(
+					"Bulk Salary Creation", other_batch, "accrual_journal_entry", "", update_modified=False
+				)
+		else:
+			results["cleared_accrual_reference"] = True
+		batch.db_set("accrual_journal_entry", "")
+
+	for row in batch.employees:
+		if not row.salary_slip:
+			_reset_batch_row_link(row.name)
+			continue
+
+		slip_batch = frappe.db.get_value("Salary Slip", row.salary_slip, "bulk_salary_creation")
+		if slip_batch == batch_name and frappe.db.exists("Salary Slip", row.salary_slip):
+			slip = frappe.get_doc("Salary Slip", row.salary_slip)
+			if slip.docstatus == 1:
+				if slip.get("journal_entry"):
+					frappe.db.set_value(
+						"Salary Slip", slip.name, "journal_entry", None, update_modified=False
+					)
+					slip.reload()
+				if slip.get("payment_entry"):
+					frappe.db.set_value(
+						"Salary Slip", slip.name, "payment_entry", None, update_modified=False
+					)
+					slip.reload()
+				slip.cancel()
+				results["cancelled_slips"].append(slip.name)
+			elif slip.docstatus == 0:
+				_clear_salary_slip_bulk_links(slip)
+				frappe.delete_doc("Salary Slip", slip.name, force=1, ignore_permissions=True)
+				results["cancelled_slips"].append(row.salary_slip)
+		else:
+			results["unlinked_slips"].append(row.salary_slip)
+		_reset_batch_row_link(row.name)
+
+	results["cancelled_additional_salaries"] = _cancel_batch_additional_salaries(batch_name)
+
+	if cint(delete_batch):
+		frappe.delete_doc("Bulk Salary Creation", batch_name, force=1, ignore_permissions=True)
+		results["deleted_batch"] = True
+	else:
+		batch.reload()
+		batch.db_set(
+			{
+				"processing_status": "Draft",
+				"accrual_journal_entry": "",
+				"bulk_payment_entry": "",
+			}
+		)
+		_update_batch_summary(batch_name)
+
+	frappe.db.commit()
+	return results
+
+
+@frappe.whitelist()
+def delete_bulk_salary_batch(batch_name: str):
+	"""Delete a bulk batch after cancelling/unlinking all linked payroll documents."""
+	return reset_bulk_salary_batch(
+		batch_name,
+		cancel_accrual=1,
+		cancel_payments=1,
+		delete_batch=1,
+	)
+
+
 def _replace_salary_slip_rows(target_slip, source_slip):
 	for parentfield in ("earnings", "deductions"):
 		frappe.db.delete("Salary Detail", {"parent": target_slip.name, "parentfield": parentfield})

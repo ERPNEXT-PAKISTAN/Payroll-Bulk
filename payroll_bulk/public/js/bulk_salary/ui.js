@@ -1507,6 +1507,7 @@ async function render_main_ui(frm) {
             <button class="bs-btn-secondary" id="bs-create-missing-btn">Create Missing</button>
           </div>
           <button class="bs-btn-secondary" id="bs-save-draft-btn">Save Draft</button>
+          <button class="bs-btn-secondary bs-btn-danger-outline" id="bs-reset-batch-btn">Reset / Cancel All</button>
         </div>
         <button class="bs-btn-primary bs-btn-lg" id="bs-review-btn">Review &amp; Create Draft Slips →</button>
       </div>
@@ -1597,6 +1598,7 @@ async function render_main_ui(frm) {
   $wrap.find("#bs-create-accrual-btn").on("click", () => bs_create_accrual_journal_entry());
   $wrap.find("#bs-create-missing-btn").on("click", () => open_payroll_dialog({ create_missing_only: true }));
   $wrap.find("#bs-save-draft-btn").on("click",     () => bs_save_draft());
+  $wrap.find("#bs-reset-batch-btn").on("click",   () => bs_reset_bulk_batch({ delete_batch: 0 }));
   $wrap.find("#bs-review-btn").on("click",         () => open_payroll_dialog());
   $wrap.find("#bs-fetch-advances-btn").on("click", () => bs_fetch_all_advances());
   $wrap.find("#bs-load-source-btn").on("click",    () => bs_load_source_data());
@@ -2598,6 +2600,65 @@ window.bs_reprocess_row = async (id, submit_slip = 0) => {
     },
   );
 };
+
+async function bs_reset_bulk_batch(options = {}) {
+  const frm = window._bs.frm;
+  if (!frm?.doc?.name) return;
+  const delete_batch = !!options.delete_batch;
+  const batch_name = frm.doc.name;
+  const has_slips = (frm.doc.employees || []).some((r) => r.salary_slip);
+  const has_accrual = !!frm.doc.accrual_journal_entry;
+  const has_payment = !!frm.doc.bulk_payment_entry || (frm.doc.employees || []).some((r) => r.payment_entry);
+
+  const lines = [
+    delete_batch
+      ? `<b>Delete batch ${batch_name}</b> and cancel/unlink all documents created from it.`
+      : `<b>Reset batch ${batch_name}</b> — cancel owned salary slips, additional salaries, and journal entries; clear row links.`,
+    "Slips owned by another batch will only be unlinked from this batch (not cancelled).",
+  ];
+  if (has_accrual) lines.push(`Accrual JE: <b>${frm.doc.accrual_journal_entry}</b> (cancelled only if this batch owns it).`);
+  if (has_payment) lines.push("Payment journal entries linked to this batch will be cancelled.");
+  if (!has_slips && !has_accrual && !has_payment && delete_batch) {
+    lines.push("No linked payroll documents found — the empty batch record will be deleted.");
+  }
+
+  frappe.confirm(
+    `${lines.join("<br>")}<br><br>Continue?`,
+    async () => {
+      try {
+        frappe.dom.freeze(delete_batch ? "Deleting batch and cleaning links…" : "Resetting batch…");
+        const method = delete_batch
+          ? "payroll_bulk.api.delete_bulk_salary_batch"
+          : "payroll_bulk.api.reset_bulk_salary_batch";
+        const res = await bs_call(method, { batch_name });
+        const msg = res.message || res || {};
+        frappe.dom.unfreeze();
+        const summary = [
+          msg.cancelled_slips?.length ? `${msg.cancelled_slips.length} slip(s) cancelled` : "",
+          msg.unlinked_slips?.length ? `${msg.unlinked_slips.length} stale link(s) cleared` : "",
+          msg.cancelled_additional_salaries ? `${msg.cancelled_additional_salaries} Additional Salary row(s) cancelled` : "",
+          msg.cancelled_journal_entries?.length ? `${msg.cancelled_journal_entries.length} JE(s) cancelled` : "",
+          msg.cleared_accrual_reference ? "Accrual reference cleared (JE kept — owned by another batch)" : "",
+          msg.deleted_batch ? "Batch deleted" : "Batch reset to Draft",
+        ].filter(Boolean).join(" · ");
+        frappe.show_alert({ message: summary || "Done", indicator: "green" }, 8);
+        if (delete_batch) {
+          frappe.set_route("List", "Bulk Salary Creation");
+          return;
+        }
+        await frm.reload_doc();
+        if (typeof bs_bootstrap_main_ui === "function") {
+          await bs_bootstrap_main_ui(frm);
+        }
+      } catch (e) {
+        frappe.dom.unfreeze();
+        frappe.msgprint({ title: "Reset failed", message: e.message || String(e), indicator: "red" });
+      }
+    },
+    () => {},
+  );
+}
+window.bs_reset_bulk_batch = bs_reset_bulk_batch;
 
 window.bs_manage_salary_slip = async (id, action) => {
   const frm = window._bs.frm;
@@ -3661,6 +3722,25 @@ async function render_submitted_view_content(frm, $body) {
     console.warn("Could not load batch summary:", error);
   }
 
+  let stale_link_warning = "";
+  try {
+    const artifact_res = await bs_call("payroll_bulk.api.get_batch_period_artifacts", { batch_name: frm.doc.name });
+    const payload = artifact_res.message || artifact_res || {};
+    const stale = Object.entries(payload.employees || {}).filter(([, entry]) => (
+      entry.linked_salary_slip && entry.period_salary_slip_foreign
+    ));
+    const lines = [];
+    if (stale.length) {
+      lines.push("This batch shows salary slips that belong to another batch. Use Reset / Cancel All to clear stale links.");
+    }
+    (payload.batch_warnings || []).forEach((msg) => lines.push(msg));
+    if (lines.length) {
+      stale_link_warning = `<div class="bs-notice bs-notice-warn bs-mb"><b>Link / period warnings</b><br>${lines.map((w) => frappe.utils.escape_html(w)).join("<br>")}</div>`;
+    }
+  } catch (error) {
+    console.warn("Batch artifact check:", error);
+  }
+
   const component_cols = bs_merge_component_columns(summary.columns || []);
   const comp_by_employee = {};
   const emp_summary_by_id = {};
@@ -3783,6 +3863,7 @@ async function render_submitted_view_content(frm, $body) {
         ${frm.doc.docstatus === 0 ? `<button type="button" class="bs-btn-secondary" onclick="bs_return_to_edit_mode()">✎ Edit Batch</button>` : ""}
       </div>
       ${kpi_html}
+      ${stale_link_warning}
       ${reconcile_html}
       ${accounting_rows.length ? `<div class="bs-accounting-panel"><div class="bs-accounting-title">Accounting</div>${accounting_rows.join("")}</div>` : ""}
       <div class="bs-footer-row bs-mb">
@@ -3790,6 +3871,8 @@ async function render_submitted_view_content(frm, $body) {
         ${draft_count ? `<button type="button" class="bs-btn-primary" onclick="bs_submit_saved_drafts()">Submit ${draft_count} Draft${draft_count > 1 ? "s" : ""}</button>` : ""}
         ${unpaid_count ? `<button type="button" class="bs-btn-primary" onclick="bs_create_bulk_payment_completed()">Pay All (${unpaid_count})</button>` : ""}
         ${!frm.doc.accrual_journal_entry ? `<button type="button" class="bs-btn-secondary" onclick="bs_create_accrual_journal_entry()">Create Accrual JE</button>` : ""}
+        <button type="button" class="bs-btn-secondary bs-btn-danger-outline" onclick="bs_reset_bulk_batch({ delete_batch: 0 })">Reset / Cancel All</button>
+        <button type="button" class="bs-btn-secondary bs-btn-danger-outline" onclick="bs_reset_bulk_batch({ delete_batch: 1 })">Delete Batch</button>
         <button type="button" class="bs-btn-secondary" onclick="bs_export_batch_csv(window._bs.frm?.doc?.employees || [], '${(frm.doc.name || "batch").replace(/'/g, "\\'")}.csv')">Export CSV</button>
       </div>
       <div class="bs-table-scroll bs-report-table-scroll">
