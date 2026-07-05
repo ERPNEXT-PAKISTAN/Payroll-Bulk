@@ -11,18 +11,18 @@ def execute(filters=None):
 	columns = pb_format_columns(
 		[
 			{"label": "Salary Slip", "fieldname": "salary_slip", "fieldtype": "Link", "options": "Salary Slip", "width": 150},
-			{"label": "Print", "fieldname": "print_action", "fieldtype": "Data", "width": 70},
 			{"label": "Batch", "fieldname": "batch", "fieldtype": "Link", "options": "Bulk Salary Creation", "width": 140},
-			{"label": "Employee", "fieldname": "employee", "fieldtype": "Link", "options": "Employee", "width": 110},
-			{"label": "Employee Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 160},
-			{"label": "Department", "fieldname": "department", "fieldtype": "Link", "options": "Department", "width": 120},
-			{"label": "Payroll Frequency", "fieldname": "payroll_frequency", "fieldtype": "Data", "width": 110},
 			{"label": "Period", "fieldname": "period", "fieldtype": "Data", "width": 170},
 			{"label": "Component", "fieldname": "salary_component", "fieldtype": "Link", "options": "Salary Component", "width": 150},
 			{"label": "Type", "fieldname": "component_type", "fieldtype": "Data", "width": 90},
 			{"label": "Amount", "fieldname": "amount", "fieldtype": "Currency", "width": 110},
 			{"label": "Gross Pay", "fieldname": "gross_pay", "fieldtype": "Currency", "width": 110},
 			{"label": "Net Pay", "fieldname": "net_pay", "fieldtype": "Currency", "width": 110},
+			{"label": "Company", "fieldname": "company", "fieldtype": "Link", "options": "Company", "width": 120},
+			{"label": "Employee", "fieldname": "employee", "fieldtype": "Link", "options": "Employee", "width": 110},
+			{"label": "Employee Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 160},
+			{"label": "Department", "fieldname": "department", "fieldtype": "Link", "options": "Department", "width": 120},
+			{"label": "Payroll Frequency", "fieldname": "payroll_frequency", "fieldtype": "Data", "width": 110},
 		]
 	)
 
@@ -49,7 +49,7 @@ def execute(filters=None):
 		)
 
 	if not slip_name:
-		return columns, [], _("Select a Salary Slip, Employee, or Batch."), None, []
+		return pb_format_columns(columns), [], _("Select a Salary Slip, Employee, or Batch."), None, []
 
 	if not frappe.has_permission("Salary Slip", "read", slip_name):
 		frappe.throw(_("Not permitted to read Salary Slip {0}").format(slip_name))
@@ -64,8 +64,8 @@ def execute(filters=None):
 	data = []
 	header = {
 		"salary_slip": slip.name,
-		"print_action": slip.name,
 		"batch": batch,
+		"company": slip.company,
 		"employee": slip.employee,
 		"employee_name": slip.employee_name,
 		"department": slip.department,
@@ -102,6 +102,6 @@ def execute(filters=None):
 		{"value": pb_money(slip.net_pay), "label": _("Net Pay"), "datatype": "Currency", "currency": slip.currency},
 	]
 
-	message = _("Use the Print button to open the salary slip print view.")
+	message = _("Use Print Salary Slip above to open the official salary slip print view.")
 
-	return columns, data, message, None, report_summary
+	return pb_format_columns(columns), data, message, None, report_summary

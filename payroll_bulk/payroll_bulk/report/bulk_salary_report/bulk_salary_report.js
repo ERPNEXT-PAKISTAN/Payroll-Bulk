@@ -25,11 +25,3 @@ frappe.query_reports["Bulk Salary Report"] = {
 		if (batch && report.set_filter_value) report.set_filter_value("batch", batch);
 	},
 };
-
-function pb_report_currency_formatter(value, row, column, data, default_formatter) {
-	value = default_formatter(value, row, column, data);
-	if (column.fieldtype === "Currency" && data && data[column.fieldname] != null) {
-		return frappe.format(data[column.fieldname], { fieldtype: "Currency", precision: 0 });
-	}
-	return value;
-}

@@ -417,19 +417,36 @@ PB_REPORT_SHORTCUTS = [
 	("ERP Salary Register", "Salary Register", "Salary Slip", "Grey"),
 ]
 
-PB_ERP_LINKS = [
-	("ERP Payroll", "Card Break", None, None),
-	("Salary Slip", "DocType", "Salary Slip", None),
-	("Additional Salary", "DocType", "Additional Salary", None),
-	("Employee", "DocType", "Employee", None),
-	("Journal Entry", "DocType", "Journal Entry", None),
-	("Daily Overtime", "DocType", "Daily Overtime", None),
-	("Salary Component", "DocType", "Salary Component", None),
-	("Salary Structure", "DocType", "Salary Structure", None),
-	("Attendance", "DocType", "Attendance", None),
-	("Employee Checkin", "DocType", "Employee Checkin", None),
-	("Employee Advance", "DocType", "Employee Advance", None),
-	("Salary Register", "Report", "Salary Register", "Salary Slip"),
+PB_OPERATIONS_LINKS = [
+	("Salary Slip", "Salary Slip", "DocType"),
+	("Additional Salary", "Additional Salary", "DocType"),
+	("Employee", "Employee", "DocType"),
+	("Journal Entry", "Journal Entry", "DocType"),
+	("Daily Overtime", "Daily Overtime", "DocType"),
+	("Attendance", "Attendance", "DocType"),
+	("Employee Checkin", "Employee Checkin", "DocType"),
+	("Employee Advance", "Employee Advance", "DocType"),
+]
+
+PB_SETUP_LINKS = [
+	("Salary Component", "Salary Component", "DocType"),
+	("Salary Structure", "Salary Structure", "DocType"),
+]
+
+PB_OPERATIONS_SHORTCUTS = [
+	("Salary Slip", "Salary Slip", "DocType", "Blue"),
+	("Additional Salary", "Additional Salary", "DocType", "Cyan"),
+	("Employee", "Employee", "DocType", "Green"),
+	("Journal Entry", "Journal Entry", "DocType", "Orange"),
+	("Daily Overtime", "Daily Overtime", "DocType", "Yellow"),
+	("Attendance", "Attendance", "DocType", "Pink"),
+	("Employee Checkin", "Employee Checkin", "DocType", "Purple"),
+	("Employee Advance", "Employee Advance", "DocType", "Red"),
+]
+
+PB_SETUP_SHORTCUTS = [
+	("Salary Component", "Salary Component", "DocType", "Grey"),
+	("Salary Structure", "Salary Structure", "DocType", "Grey"),
 ]
 
 
@@ -519,8 +536,28 @@ def _sync_payroll_bulk_workspace(card_names=None, chart_name=None, payment_chart
 		{"id": "pb_sc2", "type": "shortcut", "data": {"shortcut_name": "Employee Rows", "col": 3}},
 		{"id": "pb_sc3", "type": "shortcut", "data": {"shortcut_name": "Payroll Bulk Settings", "col": 3}},
 		{"id": "pb_sc4", "type": "shortcut", "data": {"shortcut_name": "Daily Employee Checkin", "col": 3}},
-		{"id": "pb_rep_hdr", "type": "header", "data": {"text": "<span class=\"h6\"><b>Reports</b></span>", "col": 12}},
+		{"id": "pb_ops_hdr", "type": "header", "data": {"text": "<span class=\"h6\"><b>Operations</b></span>", "col": 12}},
 	]
+	col = 0
+	for label, _, _, color in PB_OPERATIONS_SHORTCUTS:
+		content.append(
+			{
+				"id": f"pb_ops_{col}",
+				"type": "shortcut",
+				"data": {"shortcut_name": label, "col": 3},
+			}
+		)
+		col += 1
+	content.append({"id": "pb_setup_hdr", "type": "header", "data": {"text": "<span class=\"h6\"><b>Setup</b></span>", "col": 12}})
+	for idx, (label, _, _, _) in enumerate(PB_SETUP_SHORTCUTS):
+		content.append(
+			{
+				"id": f"pb_setup_{idx}",
+				"type": "shortcut",
+				"data": {"shortcut_name": label, "col": 3},
+			}
+		)
+	content.append({"id": "pb_rep_hdr", "type": "header", "data": {"text": "<span class=\"h6\"><b>Reports</b></span>", "col": 12}})
 	for idx, (label, _, _, _) in enumerate(PB_REPORT_SHORTCUTS):
 		content.append(
 			{
@@ -580,39 +617,28 @@ def _sync_payroll_bulk_workspace(card_names=None, chart_name=None, payment_chart
 			},
 		)
 
-	for label, link_type, link_to, ref_doctype in PB_ERP_LINKS:
-		if link_type == "Card Break":
-			if any(link.label == label and link.type == "Card Break" for link in ws.links):
+	def append_card_links(card_label, links):
+		if not any(link.type == "Card Break" and link.label == card_label for link in ws.links):
+			return
+		for label, link_to, link_type in links:
+			if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
+				continue
+			if any(item.link_to == link_to and item.link_type == link_type for item in ws.links):
 				continue
 			ws.append(
 				"links",
 				{
 					"label": label,
-					"link_count": 0,
-					"link_type": "DocType",
-					"type": "Card Break",
+					"link_to": link_to,
+					"link_type": link_type,
+					"type": "Link",
 				},
 			)
-			continue
-		key = (link_to, link_type)
-		if key in existing:
-			continue
-		if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
-			continue
-		if link_type == "Report" and not frappe.db.exists("Report", link_to):
-			continue
-		row = {
-			"label": label,
-			"link_to": link_to,
-			"link_type": link_type,
-			"type": "Link",
-		}
-		if link_type == "Report":
-			row["is_query_report"] = 1
-			row["report_ref_doctype"] = ref_doctype
-		ws.append("links", row)
 
-	keep_shortcuts = [row for row in ws.shortcuts if row.type not in ("Report", "Page")]
+	append_card_links("Operations", PB_OPERATIONS_LINKS)
+	append_card_links("Setup", PB_SETUP_LINKS)
+
+	keep_shortcuts = [row for row in ws.shortcuts if row.type not in ("Report", "Page", "DocType")]
 	ws.shortcuts = []
 	for row in keep_shortcuts:
 		ws.append("shortcuts", row.as_dict())
@@ -634,6 +660,30 @@ def _sync_payroll_bulk_workspace(card_names=None, chart_name=None, payment_chart
 				"link_to": report_name,
 				"type": "Report",
 				"report_ref_doctype": ref_doctype,
+				"color": color,
+			},
+		)
+	for label, link_to, link_type, color in PB_OPERATIONS_SHORTCUTS:
+		if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
+			continue
+		ws.append(
+			"shortcuts",
+			{
+				"label": label,
+				"link_to": link_to,
+				"type": link_type,
+				"color": color,
+			},
+		)
+	for label, link_to, link_type, color in PB_SETUP_SHORTCUTS:
+		if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
+			continue
+		ws.append(
+			"shortcuts",
+			{
+				"label": label,
+				"link_to": link_to,
+				"type": link_type,
 				"color": color,
 			},
 		)
@@ -678,11 +728,11 @@ def _sync_payroll_bulk_sidebar():
 			},
 		)
 
-	if "ERP Payroll" not in existing:
+	if "Operations ERP" not in existing:
 		sb.append(
 			"items",
 			{
-				"label": "ERP Payroll",
+				"label": "Operations ERP",
 				"link_type": "DocType",
 				"type": "Section Break",
 				"child": 0,
@@ -690,16 +740,43 @@ def _sync_payroll_bulk_sidebar():
 				"keep_closed": 1,
 			},
 		)
-		existing.add("ERP Payroll")
+		existing.add("Operations ERP")
 
-	for label, link_type, link_to, ref_doctype in PB_ERP_LINKS:
-		if link_type == "Card Break":
-			continue
+	for label, link_to, link_type in PB_OPERATIONS_LINKS:
 		if label in existing:
 			continue
-		if link_type == "DocType" and not frappe.db.exists("DocType", link_to):
+		if not frappe.db.exists("DocType", link_to):
 			continue
-		if link_type == "Report" and not frappe.db.exists("Report", link_to):
+		sb.append(
+			"items",
+			{
+				"label": label,
+				"link_to": link_to,
+				"link_type": link_type,
+				"type": "Link",
+				"child": 1,
+				"indent": 0,
+			},
+		)
+
+	if "Setup ERP" not in existing:
+		sb.append(
+			"items",
+			{
+				"label": "Setup ERP",
+				"link_type": "DocType",
+				"type": "Section Break",
+				"child": 0,
+				"indent": 1,
+				"keep_closed": 1,
+			},
+		)
+		existing.add("Setup ERP")
+
+	for label, link_to, link_type in PB_SETUP_LINKS:
+		if label in existing:
+			continue
+		if not frappe.db.exists("DocType", link_to):
 			continue
 		sb.append(
 			"items",

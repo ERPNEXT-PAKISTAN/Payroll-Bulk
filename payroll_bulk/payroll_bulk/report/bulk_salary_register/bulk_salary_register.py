@@ -123,12 +123,8 @@ def execute(filters=None):
 def _base_columns(earning_components, deduction_components):
 	columns = [
 		{"label": "Batch", "fieldname": "batch", "fieldtype": "Link", "options": "Bulk Salary Creation", "width": 150},
-		{"label": "Company", "fieldname": "company", "fieldtype": "Link", "options": "Company", "width": 120},
-		{"label": "Frequency", "fieldname": "payroll_frequency", "fieldtype": "Data", "width": 100},
 		{"label": "Period", "fieldname": "period", "fieldtype": "Data", "width": 170},
-		{"label": "Employee", "fieldname": "employee", "fieldtype": "Link", "options": "Employee", "width": 110},
 		{"label": "Employee Name", "fieldname": "employee_name", "fieldtype": "Data", "width": 160},
-		{"label": "Department", "fieldname": "department", "fieldtype": "Link", "options": "Department", "width": 120},
 	]
 	for component in earning_components:
 		columns.append(
@@ -155,6 +151,10 @@ def _base_columns(earning_components, deduction_components):
 		[
 			{"label": "Total Deductions", "fieldname": "total_deductions", "fieldtype": "Currency", "width": 110, "precision": 0},
 			{"label": "Net Pay", "fieldname": "net_pay", "fieldtype": "Currency", "width": 110, "precision": 0},
+			{"label": "Company", "fieldname": "company", "fieldtype": "Link", "options": "Company", "width": 120},
+			{"label": "Employee", "fieldname": "employee", "fieldtype": "Link", "options": "Employee", "width": 110},
+			{"label": "Department", "fieldname": "department", "fieldtype": "Link", "options": "Department", "width": 120},
+			{"label": "Frequency", "fieldname": "payroll_frequency", "fieldtype": "Data", "width": 100},
 		]
 	)
 	return columns

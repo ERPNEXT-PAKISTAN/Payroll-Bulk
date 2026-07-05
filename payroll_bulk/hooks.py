@@ -15,7 +15,7 @@ required_apps = ["erpnext", "hrms"]
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/payroll_bulk/css/payroll_bulk.css"
-# app_include_js = "/assets/payroll_bulk/js/payroll_bulk.js"
+app_include_js = "/assets/payroll_bulk/js/pb_report_tools.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/payroll_bulk/css/payroll_bulk.css"

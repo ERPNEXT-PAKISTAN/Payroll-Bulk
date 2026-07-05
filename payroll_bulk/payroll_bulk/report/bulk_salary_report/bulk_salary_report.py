@@ -106,4 +106,4 @@ def execute(filters=None):
 		{"value": total_net, "label": _("Total Net"), "datatype": "Currency", "currency": frappe.defaults.get_global_default("currency")},
 	]
 
-	return columns, rows, None, None, report_summary
+	return pb_format_columns(columns), rows, None, None, report_summary
