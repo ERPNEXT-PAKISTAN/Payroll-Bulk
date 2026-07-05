@@ -49,7 +49,7 @@ window.BS_BACKGROUND_ROW_THRESHOLD = BS_BACKGROUND_ROW_THRESHOLD;
 
 frappe.ui.form.on("Bulk Salary Creation", {
   before_save(frm) {
-    if (typeof bs_sync_period_from_header === "function") {
+    if (typeof bs_sync_period_from_header === "function" && !window._bs?._lock_batch_period) {
       bs_sync_period_from_header(frm);
     }
     if (typeof bs_sync_source_doc === "function" && window._bs?.frm === frm && window._bs?.source_ctrls) {

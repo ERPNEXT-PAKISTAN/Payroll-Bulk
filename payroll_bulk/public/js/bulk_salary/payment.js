@@ -216,12 +216,19 @@ window.bs_create_single_payment = function(employee_id) {
         frappe.show_alert({message:"Select a pay-from account.",indicator:"red"},4); return;
       }
       d.hide();
+      const pw = bs_create_process_window({
+        title: "Creating Payment Journal Entry",
+        subtitle: `${result.employee_name || result.employee}`,
+        modal: true,
+      });
+      pw.log("Resolving salary payable account…");
       try {
         const payableRes = await bs_call("payroll_bulk.api.get_salary_payable_account", {
           slip_name: result.slip_name,
           batch_name: frm?.doc?.name || "",
         });
         const payable_account = payableRes.message;
+        pw.log(`Payable account: <b>${payable_account}</b>`, "info");
         const jv_remark = await bs_get_payroll_jv_remark(frm);
         const pay_from_meta = await bs_call("frappe.client.get_value", {
           doctype: "Account",
@@ -231,11 +238,14 @@ window.bs_create_single_payment = function(employee_id) {
         const account_type = pay_from_meta.message?.account_type || "";
         const voucher_type = account_type === "Cash" ? "Cash Entry" : "Bank Entry";
         const reference_no = (v.reference_no || frm?.doc?.name || result.slip_name || "").trim();
+        pw.log("Creating journal entry…");
         const je_doc = {
             doctype: "Journal Entry",
             voucher_type,
             posting_date: v.payment_date,
             company: vals.company||frappe.defaults.get_default("company"),
+            custom_remark: 1,
+            remark: jv_remark,
             user_remark: jv_remark,
             accounts: [
               {
@@ -246,11 +256,13 @@ window.bs_create_single_payment = function(employee_id) {
                 reference_name: result.slip_name,
                 debit_in_account_currency: v.amount,
                 credit_in_account_currency: 0,
+                user_remark: jv_remark,
               },
               {
                 account: v.pay_from,
                 debit_in_account_currency: 0,
                 credit_in_account_currency: v.amount,
+                user_remark: jv_remark,
               },
             ],
         };
@@ -263,21 +275,28 @@ window.bs_create_single_payment = function(employee_id) {
         }
         const pe = await bs_call("frappe.client.insert", { doc: je_doc });
         result.payment_entry = pe.message.name;
-        const safe_id = employee_id.replace(/[^a-z0-9]/gi,"-");
-        const btn = document.getElementById(`bs-pay-btn-${safe_id}`);
-        if (btn) {
-          btn.textContent = `✓ ${pe.message.name}`;
-          btn.disabled = true;
-          btn.style.color = "var(--bs-green)";
-        }
+        pw.log(`Journal Entry <b>${pe.message.name}</b> created ✓`, "success");
         await bs_persist_payment_reference(employee_id, pe.message.name, "Payment Created");
-        if (frm && typeof bs_is_completed_batch === "function" && bs_is_completed_batch(frm.doc)) {
-          window._bs._completed_view_batch = null;
-          render_submitted_view(frm);
-        }
-        frappe.show_alert({message:`Journal Entry <b>${pe.message.name}</b> created ✓`,indicator:"green"},5);
+        pw.complete({
+          indicator: "success",
+          html: `<div class="bs-notice bs-notice-info">Payment JE <b>${pe.message.name}</b> created for <b>${fmt_num(v.amount)}</b>.</div>`,
+          button_label: "Done",
+        });
+        pw.on_done(() => {
+          const safe_id = employee_id.replace(/[^a-z0-9]/gi,"-");
+          const btn = document.getElementById(`bs-pay-btn-${safe_id}`);
+          if (btn) {
+            btn.textContent = `✓ ${pe.message.name}`;
+            btn.disabled = true;
+            btn.style.color = "var(--bs-green)";
+          }
+          if (frm && typeof bs_is_completed_batch === "function" && bs_is_completed_batch(frm.doc)) {
+            window._bs._completed_view_batch = null;
+            render_submitted_view(frm);
+          }
+        });
       } catch(err) {
-        frappe.msgprint({title:"Payment Error",message:err.message||String(err),indicator:"red"});
+        pw.fail(err.message || String(err), "Close");
       }
     },
   });
@@ -288,8 +307,6 @@ window.bs_create_single_payment = function(employee_id) {
 /** Create bulk payment JE via server API (updates batch rows and summary). */
 async function bs_create_bulk_payment(success_results, pay_from_account, vals) {
   const notice = (msg, type = "info") => bs_notice("bs-pay-notice", msg, type);
-  notice("⏳ Creating bulk journal entry…");
-
   const frm = window._bs.frm;
   const batch_name = frm?.doc?.name;
   if (!batch_name) {
@@ -306,7 +323,16 @@ async function bs_create_bulk_payment(success_results, pay_from_account, vals) {
     return;
   }
 
+  const pw = bs_create_process_window({
+    title: "Creating Bulk Payment Journal Entry",
+    subtitle: `${eligible.length} employee(s)`,
+    total: eligible.length,
+    modal: true,
+  });
+  pw.log("Preparing bulk payment journal entry…");
+
   try {
+    pw.log("Creating payment journal entry on server…");
     const res = await bs_call("payroll_bulk.api.create_bulk_payment_journal_entry", {
       batch_name,
       pay_from_account,
@@ -315,16 +341,26 @@ async function bs_create_bulk_payment(success_results, pay_from_account, vals) {
       employees: eligible.map((r) => r.employee),
     });
     const data = res.message || {};
-    notice(`✓ Journal Entry <b>${data.journal_entry}</b> created for ${fmt_num(data.total_net)}!`, "success");
+    pw.log(`Journal Entry <b>${data.journal_entry}</b> created ✓`, "success");
+    pw.set_prog(eligible.length);
     for (const result of eligible) {
       result.payment_entry = data.journal_entry;
       await bs_persist_payment_reference(result.employee, data.journal_entry, "Payment Created");
     }
-    if (frm) {
-      window._bs._completed_view_batch = null;
-      await frm.reload_doc();
-    }
+    pw.complete({
+      indicator: "success",
+      html: `<div class="bs-notice bs-notice-info">Payment JE <b>${data.journal_entry}</b> created for <b>${fmt_num(data.total_net)}</b> (${eligible.length} employee(s)).</div>`,
+      button_label: "Done",
+    });
+    pw.on_done(async () => {
+      notice(`✓ Journal Entry <b>${data.journal_entry}</b> created for ${fmt_num(data.total_net)}!`, "success");
+      if (frm) {
+        window._bs._completed_view_batch = null;
+        await frm.reload_doc();
+      }
+    });
   } catch (err) {
+    pw.fail(err.message || String(err), "Close");
     notice(`❌ ${err.message || String(err)}`, "error");
   }
 }
@@ -389,25 +425,41 @@ window.bs_create_bulk_payment_completed = function () {
     primary_action_label: "Create Payment JE",
     async primary_action(values) {
       d.hide();
-      frappe.dom.freeze("Creating bulk payment…");
+      const pw = bs_create_process_window({
+        title: "Creating Bulk Payment Journal Entry",
+        subtitle: `${unpaid.length} employee(s) · Total net ${fmt_num(unpaid.reduce((s, r) => s + parseFloat(r.net_pay || 0), 0))}`,
+        total: unpaid.length,
+        modal: true,
+      });
+      pw.log("Validating unpaid submitted salary slips…");
       try {
+        pw.log(`Pay from <b>${values.pay_from}</b> · Date ${values.payment_date}`, "info");
+        pw.log("Creating payment journal entry on server…");
         const res = await bs_call("payroll_bulk.api.create_bulk_payment_journal_entry", {
           batch_name: frm.doc.name,
           pay_from_account: values.pay_from,
           payment_date: values.payment_date,
           reference_no: values.reference_no || frm.doc.name,
         });
-        window._bs._completed_view_batch = null;
-        await frm.reload_doc();
-        render_submitted_view(frm);
-        frappe.show_alert(
-          { message: `Payment JE <b>${res.message.journal_entry}</b> created for ${res.message.employee_count} employee(s).`, indicator: "green" },
-          6,
-        );
+        const data = res.message || {};
+        pw.log(`Journal Entry <b>${data.journal_entry}</b> created ✓`, "success");
+        pw.set_prog(unpaid.length);
+        pw.complete({
+          indicator: "success",
+          html: `<div class="bs-notice bs-notice-info">Payment JE <b>${data.journal_entry}</b> created for <b>${data.employee_count || unpaid.length}</b> employee(s).</div>`,
+          button_label: "Done",
+        });
+        pw.on_done(async () => {
+          window._bs._completed_view_batch = null;
+          await frm.reload_doc();
+          render_submitted_view(frm);
+          frappe.show_alert(
+            { message: `Payment JE <b>${data.journal_entry}</b> created for ${data.employee_count || unpaid.length} employee(s).`, indicator: "green" },
+            6,
+          );
+        });
       } catch (error) {
-        frappe.msgprint({ title: "Payment Error", message: error.message || String(error), indicator: "red" });
-      } finally {
-        frappe.dom.unfreeze();
+        pw.fail(error.message || String(error), "Close");
       }
     },
   });

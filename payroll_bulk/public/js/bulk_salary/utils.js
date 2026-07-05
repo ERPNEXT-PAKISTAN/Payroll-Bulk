@@ -184,13 +184,13 @@ function bs_row_base_pay(row, frm) {
   return bs_round_money(bs_calculate_base_pay(row, frm || window._bs.frm));
 }
 
-function bs_build_emp_cell_html(r, { compact = false, expand_btn = "" } = {}) {
+function bs_build_emp_cell_html(r, { compact = false, report = false, expand_btn = "" } = {}) {
   return `
-    <div class="bs-emp-cell${compact ? " bs-emp-cell-compact" : ""}">
+    <div class="bs-emp-cell${compact ? " bs-emp-cell-compact" : ""}${report ? " bs-emp-cell-report" : ""}">
       ${expand_btn}
       <div class="bs-emp-avatar">${bs_get_initials(r.employee_name || r.employee)}</div>
       <div class="bs-emp-meta">
-        <div class="bs-emp-name-main">${frappe.utils.escape_html(r.employee_name && r.employee_name !== r.employee ? r.employee_name : r.employee)}</div>
+        <div class="bs-emp-name-main" title="${frappe.utils.escape_html(r.employee_name || r.employee || "")}">${frappe.utils.escape_html(r.employee_name && r.employee_name !== r.employee ? r.employee_name : r.employee)}</div>
         <div class="bs-emp-id">${r.employee || ""}</div>
       </div>
     </div>`;
@@ -501,6 +501,33 @@ function inject_bs_styles() {
     .bs-row.is-expanded .bs-td{background:#f8fbff}
     .bs-row.is-expanded .bs-td-sticky{background:#f8fbff}
     .bs-row.has-issue .bs-td-sticky{border-left:3px solid var(--bs-red)}
+
+    /* Completed / report view table — sticky employee, scroll components */
+    .bs-report-table-scroll{overflow-x:auto;overflow-y:auto;max-height:68vh;-webkit-overflow-scrolling:touch}
+    .bs-table-report{width:max-content;min-width:100%;table-layout:auto;font-size:12px;margin-left:0}
+    .bs-table-report .bs-th,.bs-table-report .bs-td{padding:3px 7px;vertical-align:middle;line-height:1.25}
+    .bs-table-report thead .bs-th{padding:5px 7px;font-size:10px;letter-spacing:.3px}
+    .bs-table-report .bs-report-col-emp{
+      position:sticky;left:0;z-index:4;min-width:132px;max-width:148px;width:138px;
+      background:#fff;box-shadow:1px 0 0 #e2e8f0
+    }
+    .bs-table-report thead .bs-report-col-emp{z-index:7;background:linear-gradient(180deg,#f8fbff 0%,#eef4ff 100%)}
+    .bs-table-report .bs-row:nth-child(even) .bs-report-col-emp{background:#fbfdff}
+    .bs-table-report .bs-row:hover .bs-report-col-emp{background:#f0f7ff}
+    .bs-table-report .bs-total-row .bs-report-col-emp{background:#f8fafc;font-weight:700}
+    .bs-table-report .bs-report-col-dept{min-width:88px;max-width:110px;white-space:nowrap}
+    .bs-table-report .bs-report-col-fixed{min-width:72px;white-space:nowrap}
+    .bs-table-report .bs-th-comp,.bs-table-report .bs-td-comp{min-width:76px;max-width:104px;white-space:nowrap}
+    .bs-table-report .bs-report-col-action{min-width:64px;white-space:nowrap}
+    .bs-table-report .bs-dept-cell{max-width:100px;font-size:10px}
+    .bs-table-report .bs-emp-cell-report{gap:5px;align-items:center;min-width:0}
+    .bs-table-report .bs-emp-cell-report .bs-emp-avatar{width:22px;height:22px;font-size:8px;flex-shrink:0}
+    .bs-table-report .bs-emp-cell-report .bs-emp-meta{min-width:0;overflow:hidden}
+    .bs-table-report .bs-emp-cell-report .bs-emp-name-main{font-size:11px;font-weight:700;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:108px}
+    .bs-table-report .bs-emp-cell-report .bs-emp-id{font-size:9px;line-height:1.1;color:#64748b;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:108px}
+    .bs-table-report .bs-status-badge{font-size:9px;padding:2px 6px;line-height:1.2}
+    .bs-table-report .bs-btn-ghost.bs-btn-sm{padding:1px 6px;font-size:10px;line-height:1.2}
+    .bs-table-report .bs-mono{font-size:10px}
     .bs-row-detail .bs-td-detail{padding:4px 6px 6px;border-bottom:1px solid #e9eef5;background:#f8fafc}
     .bs-row-detail-wrap{display:flex;flex-direction:column;gap:4px}
     .bs-expand-columns{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,2.8fr) minmax(0,.55fr);gap:8px;align-items:stretch}
@@ -727,6 +754,22 @@ function inject_bs_styles() {
     .bs-log-success{color:var(--bs-green)}.bs-log-error{color:var(--bs-red)}.bs-log-info{color:#93c5fd}
     .bs-log-emp{font-weight:700;color:var(--bs-amber)}
 
+    /* Process window (salary slips, accrual, payment) */
+    .bs-process-window{padding:2px 0}
+    .bs-process-header{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+    .bs-process-spinner{width:28px;height:28px;border:3px solid #dbeafe;border-top-color:#2563eb;border-radius:50%;animation:bs-spin .8s linear infinite;flex-shrink:0}
+    .bs-process-spinner-done{animation:none;border-color:#bbf7d0;border-top-color:#16a34a}
+    .bs-process-spinner-done.bs-process-error{border-color:#fecaca;border-top-color:#dc2626}
+    .bs-process-spinner-done.bs-process-warn{border-color:#fde68a;border-top-color:#d97706}
+    .bs-process-spinner-done::after{content:"✓";display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:14px;font-weight:700;color:#16a34a;line-height:22px}
+    .bs-process-spinner-done.bs-process-error::after{content:"✕";color:#dc2626}
+    .bs-process-spinner-done.bs-process-warn::after{content:"!";color:#d97706}
+    @keyframes bs-spin{to{transform:rotate(360deg)}}
+    .bs-process-title{font-size:15px;font-weight:700;color:var(--bs-text)}
+    .bs-process-sub{font-size:12px;color:var(--bs-muted);margin-top:2px}
+    .bs-process-result{margin-top:12px}
+    .bs-process-actions{display:flex;gap:8px;flex-wrap:wrap}
+
     /* Summary */
     .bs-summary-totals{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
     .bs-live-summary{margin-top:14px}
@@ -756,6 +799,136 @@ function inject_bs_styles() {
   `;
   document.head.appendChild(s);
 }
+
+/** Modal or inline progress window — stays open until complete(), then shows result + action button. */
+function bs_create_process_window(opts = {}) {
+  const total = parseInt(opts.total || 0, 10);
+  const use_modal = opts.modal !== false && !opts.target;
+  const uid = `bs-pw-${Date.now()}`;
+  const progress_html = total > 0
+    ? `<div class="bs-progress-wrap">
+        <div class="bs-progress-bar-bg"><div class="bs-progress-bar" id="${uid}-bar" style="width:0%"></div></div>
+        <div class="bs-prog-label" id="${uid}-label">0 / ${total}</div>
+      </div>`
+    : "";
+
+  const body_html = `
+    <div class="bs-process-window" id="${uid}">
+      <div class="bs-process-header">
+        <div class="bs-process-spinner" id="${uid}-spin"></div>
+        <div class="bs-process-head-text">
+          <div class="bs-process-title" id="${uid}-title">${opts.title || "Processing…"}</div>
+          <div class="bs-process-sub" id="${uid}-sub">${opts.subtitle || ""}</div>
+        </div>
+      </div>
+      ${progress_html}
+      <div class="bs-log" id="${uid}-log"></div>
+      <div class="bs-process-result" id="${uid}-result" style="display:none"></div>
+      ${!use_modal ? `<div class="bs-process-actions" id="${uid}-actions" style="display:none;margin-top:14px">
+        <button type="button" class="bs-btn-primary" id="${uid}-done">${opts.done_label || "Continue"}</button>
+      </div>` : ""}
+    </div>`;
+
+  let dialog = null;
+  let done_fn = null;
+  let finished = false;
+
+  if (use_modal) {
+    dialog = new frappe.ui.Dialog({
+      title: opts.title || "Processing…",
+      size: opts.size || "large",
+      fields: [{ fieldtype: "HTML", fieldname: "body", options: body_html }],
+      primary_action_label: "Processing…",
+      primary_action() {
+        if (!finished) return;
+        dialog.hide();
+        if (done_fn) done_fn();
+      },
+    });
+    dialog.get_primary_btn().prop("disabled", true);
+    dialog.$wrapper.find(".btn-modal-close, .close").hide();
+    dialog.show();
+  } else if (opts.target) {
+    opts.target.html(`<div class="bs-wrap">${body_html}</div>`);
+  }
+
+  const el = (suffix) => document.getElementById(`${uid}-${suffix}`);
+
+  const log = (msg, type = "info") => {
+    const box = el("log");
+    if (!box) return;
+    const row = document.createElement("div");
+    row.className = `bs-log-row bs-log-${type}`;
+    row.innerHTML = msg;
+    box.appendChild(row);
+    box.scrollTop = box.scrollHeight;
+  };
+
+  const set_prog = (n) => {
+    if (!total) return;
+    const b = el("bar");
+    const l = el("label");
+    const pct = Math.round((parseFloat(n) || 0) / Math.max(total, 1) * 100);
+    if (b) b.style.width = `${pct}%`;
+    if (l) l.textContent = `${n} / ${total}`;
+  };
+
+  const set_title = (t) => {
+    const node = el("title");
+    if (node) node.textContent = t;
+    if (dialog) dialog.set_title(t);
+  };
+
+  const set_subtitle = (t) => {
+    const node = el("sub");
+    if (node) node.textContent = t;
+  };
+
+  const finish_ui = (summary_html, indicator, button_label) => {
+    finished = true;
+    const spin = el("spin");
+    if (spin) spin.classList.add("bs-process-spinner-done", `bs-process-${indicator || "success"}`);
+    const res = el("result");
+    if (res) {
+      res.style.display = "";
+      res.innerHTML = summary_html;
+    }
+    const label = button_label || "Close";
+    if (use_modal && dialog) {
+      const titles = { success: "Complete", error: "Failed", warn: "Complete with issues" };
+      dialog.set_title(titles[indicator] || "Complete");
+      dialog.get_primary_btn().prop("disabled", false).text(label);
+      dialog.$wrapper.find(".btn-modal-close, .close").show();
+    } else {
+      const actions = el("actions");
+      const btn = el("done");
+      if (actions) actions.style.display = "";
+      if (btn) {
+        btn.textContent = label;
+        btn.onclick = () => { if (done_fn) done_fn(); };
+      }
+    }
+  };
+
+  return {
+    log,
+    set_prog,
+    set_title,
+    set_subtitle,
+    complete(summary = {}) {
+      finish_ui(summary.html || "", summary.indicator || "success", summary.button_label);
+    },
+    fail(msg, button_label = "Close") {
+      log(msg, "error");
+      finish_ui(`<div class="bs-notice bs-notice-error">${msg}</div>`, "error", button_label);
+    },
+    on_done(fn) {
+      done_fn = fn;
+    },
+    dialog,
+  };
+}
+window.bs_create_process_window = bs_create_process_window;
 
 
 // style patch marker

@@ -1013,15 +1013,19 @@ class _BulkAccrualAdapter:
 				row["reference_type"] = None
 				row["reference_name"] = None
 
+		if user_remark:
+			for row in accounts:
+				row["user_remark"] = user_remark
+
 		multi_currency = 1 if len(currencies) > 1 else 0
 		journal_entry = frappe.new_doc("Journal Entry")
 		journal_entry.voucher_type = voucher_type
-		journal_entry.user_remark = user_remark
 		journal_entry.company = self.company
 		journal_entry.posting_date = self.posting_date
 		journal_entry.party_not_required = False if employee_wise_accounting_enabled else True
 		journal_entry.set("accounts", accounts)
 		journal_entry.multi_currency = multi_currency
+		_apply_bulk_jv_remarks(journal_entry, user_remark)
 		if voucher_type == "Journal Entry":
 			journal_entry.title = payroll_payable_account
 		journal_entry.save(ignore_permissions=True)
@@ -1101,12 +1105,32 @@ def _get_common_payroll_payable_account(salary_slips):
 
 
 def _format_bulk_jv_remark(batch) -> str:
-	"""Standard JV remark, e.g. 'Salary F/O January-2026, Dated:31-1-2026'."""
+	"""Standard JV remark, e.g. 'Salary F/O Mar-2026, BSC-2026-00022 dated 31-03-2026'."""
 	posting_date = getdate(batch.posting_date or batch.end_date or batch.start_date)
 	period_start = getdate(batch.start_date or posting_date)
-	month_label = period_start.strftime("%B-%Y")
-	dated = f"{posting_date.day}-{posting_date.month}-{posting_date.year}"
-	return f"Salary F/O {month_label}, Dated:{dated}"
+	month_label = period_start.strftime("%b-%Y")
+	dated = posting_date.strftime("%d-%m-%Y")
+	return f"Salary F/O {month_label}, {batch.name} dated {dated}"
+
+
+def _apply_bulk_jv_remarks(target, remark: str):
+	"""Set Journal Entry remark/user_remark and child account user_remark."""
+	if not remark:
+		return target
+	if isinstance(target, dict):
+		target["custom_remark"] = 1
+		target["remark"] = remark
+		target["user_remark"] = remark
+		for row in target.get("accounts") or []:
+			row["user_remark"] = remark
+		return target
+
+	target.custom_remark = 1
+	target.remark = remark
+	target.user_remark = remark
+	for row in target.get("accounts") or []:
+		row.user_remark = remark
+	return target
 
 
 # ---------------------------------------------------------------------------
@@ -1300,9 +1324,9 @@ def create_bulk_payment_journal_entry(
 		"voucher_type": voucher_type,
 		"posting_date": payment_date,
 		"company": batch.company,
-		"user_remark": remark,
 		"accounts": accounts,
 	}
+	_apply_bulk_jv_remarks(je_data, remark)
 	# ERPNext requires Reference No + Date for Bank Entry; Cash only if reference is given.
 	if voucher_type == "Bank Entry":
 		je_data["cheque_no"] = reference_no or batch_name
@@ -1761,6 +1785,34 @@ def _validate_row_source_days(row, batch, start_date: str, end_date: str):
 			)
 
 
+def _batch_needs_source_recalc(batch) -> bool:
+	mode = batch.calculation_mode or "Manual"
+	manual_basis = batch.get("manual_salary_basis") or "Full Month"
+	for row in batch.get("employees") or []:
+		if not row.get("employee"):
+			continue
+		if mode in ("Attendance Based", "Checkin Based"):
+			if not flt(row.payment_days) and not flt(row.attendance_days):
+				return True
+		elif mode == "Manual" and manual_basis in ("By Payment Days", "Deduct Absent Days"):
+			if not flt(row.payment_days) and not flt(row.attendance_days):
+				return True
+		elif mode == "Per Piece or Per Hour":
+			if not flt(row.source_hours) and not flt(row.source_qty):
+				return True
+		elif mode == "Manual" and manual_basis == "Full Month":
+			if not flt(row.payment_days):
+				return True
+	overtime_source = batch.get("overtime_source") or "Manual"
+	if overtime_source != "Manual":
+		for row in batch.get("employees") or []:
+			if not row.get("employee"):
+				continue
+			if not flt(row.ot_input) and not flt(row.overtime_hours) and not flt(row.ot_amount):
+				return True
+	return False
+
+
 @frappe.whitelist()
 def ensure_bulk_batch_source_data(
 	batch_name: str,
@@ -1772,8 +1824,8 @@ def ensure_bulk_batch_source_data(
 		frappe.throw(_("Bulk Salary Creation {0} not found.").format(batch_name))
 
 	batch = frappe.get_doc("Bulk Salary Creation", batch_name)
-	start_date = start_date or batch.start_date
-	end_date = end_date or batch.end_date
+	start_date = batch.start_date or start_date
+	end_date = batch.end_date or end_date
 	if not start_date or not end_date:
 		frappe.throw(_("Batch start and end dates are required."))
 
@@ -1787,7 +1839,7 @@ def ensure_bulk_batch_source_data(
 	from payroll_bulk.source_recalc import recalculate_bulk_salary_source
 
 	try:
-		if recalculate_bulk_salary_source(batch):
+		if _batch_needs_source_recalc(batch) and recalculate_bulk_salary_source(batch):
 			batch.save(ignore_permissions=True)
 	except Exception:
 		frappe.log_error(title=f"Bulk source recalc failed for {batch_name}")

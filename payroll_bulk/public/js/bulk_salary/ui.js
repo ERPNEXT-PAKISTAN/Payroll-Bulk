@@ -468,28 +468,82 @@ function bs_focus_pending_editable() {
 }
 
 async function bs_apply_period_controls(frm, trigger = "dates") {
-  const period = bs_normalize_period(bs_read_period_from_header(), trigger);
+  const period = bs_normalize_period(bs_read_period_from_header(frm), trigger);
   await bs_set_doc_values(frm, period);
   Object.assign(frm.doc, period);
   bs_update_header_period(frm);
   return period;
 }
 
-function bs_read_period_from_header() {
-  return {
+function bs_read_period_from_header(frm) {
+  frm = frm || window._bs?.frm;
+  const doc = frm?.doc || {};
+  const from_dom = {
     month: $("#bs-head-month-select").val() || "",
-    payroll_frequency: $("#bs-head-frequency").val() || "Monthly",
+    payroll_frequency: $("#bs-head-frequency").val() || "",
     start_date: $("#bs-head-start-date").val() || "",
     end_date: $("#bs-head-end-date").val() || "",
     posting_date: $("#bs-head-posting-date").val() || "",
   };
+  return {
+    month: from_dom.month || doc.month || "",
+    payroll_frequency: from_dom.payroll_frequency || doc.payroll_frequency || "Monthly",
+    start_date: from_dom.start_date || doc.start_date || "",
+    end_date: from_dom.end_date || doc.end_date || "",
+    posting_date: from_dom.posting_date || doc.posting_date || "",
+  };
 }
 
 function bs_sync_period_from_header(frm, trigger = "dates") {
-  const period = bs_normalize_period(bs_read_period_from_header(), trigger);
+  if (window._bs?._lock_batch_period) {
+    return {
+      month: frm.doc.month || "",
+      payroll_frequency: frm.doc.payroll_frequency || "Monthly",
+      start_date: frm.doc.start_date || "",
+      end_date: frm.doc.end_date || "",
+      posting_date: frm.doc.posting_date || "",
+    };
+  }
+  const current = bs_read_period_from_header(frm);
+  if (current.start_date && current.end_date && bs_period_is_consistent(current)) {
+    Object.assign(frm.doc, current);
+    if (current.start_date) frm.doc.month = bs_month_from_date(current.start_date) || frm.doc.month;
+    return current;
+  }
+  const period = bs_normalize_period(current, trigger);
   Object.assign(frm.doc, period);
   return period;
 }
+
+function bs_snapshot_batch_state(frm) {
+  return {
+    period: {
+      month: frm.doc.month || "",
+      payroll_frequency: frm.doc.payroll_frequency || "Monthly",
+      start_date: frm.doc.start_date || "",
+      end_date: frm.doc.end_date || "",
+      posting_date: frm.doc.posting_date || "",
+      company: frm.doc.company || "",
+    },
+    rows: JSON.parse(JSON.stringify(window._bs.rows || [])),
+  };
+}
+
+async function bs_restore_batch_snapshot(frm, snapshot) {
+  if (!frm || !snapshot) return;
+  Object.assign(frm.doc, snapshot.period);
+  window._bs.rows = JSON.parse(JSON.stringify(snapshot.rows || []));
+  if (typeof bs_sync_to_frm === "function") bs_sync_to_frm(frm);
+  try {
+    await new Promise((res, rej) => frm.save("Save", (r) => (r.exc ? rej(new Error(r.exc)) : res(r))));
+    await frm.reload_doc();
+  } catch (error) {
+    console.warn("Batch restore save failed:", error);
+  }
+  if (typeof bs_bootstrap_main_ui === "function") await bs_bootstrap_main_ui(frm);
+}
+window.bs_snapshot_batch_state = bs_snapshot_batch_state;
+window.bs_restore_batch_snapshot = bs_restore_batch_snapshot;
 
 function bs_period_key(start_date, end_date) {
   return `${start_date || ""}|${end_date || ""}`;
@@ -2684,20 +2738,41 @@ window.bs_create_accrual_journal_entry = async () => {
     return;
   }
 
+  const pw = bs_create_process_window({
+    title: "Creating Accrual Journal Entry",
+    subtitle: frm.doc.name,
+    modal: true,
+  });
+  pw.log("Validating batch and salary slips…");
+
   try {
+    pw.log("Creating accrual journal entry on server…");
     const res = await bs_call("payroll_bulk.api.create_bulk_accrual_journal_entry", {
       batch_name: frm.doc.name,
     });
     const journal_entry = res.message?.journal_entry || res.journal_entry || res.message;
-    if (journal_entry) {
-      await frm.set_value("accrual_journal_entry", journal_entry);
-      frappe.show_alert({ message: `Accrual Journal Entry ${journal_entry} ready.`, indicator: "green" }, 5);
-      bs_render_table();
+    if (!journal_entry) {
+      pw.fail("Accrual processed but no Journal Entry was returned.", "Close");
       return;
     }
-    frappe.show_alert({ message: "Accrual Journal Entry processed.", indicator: "green" }, 4);
+    pw.log(`Journal Entry <b>${journal_entry}</b> created ✓`, "success");
+    pw.complete({
+      indicator: "success",
+      html: `<div class="bs-notice bs-notice-info">Accrual Journal Entry <b>${journal_entry}</b> is ready.</div>`,
+      button_label: "Done",
+    });
+    pw.on_done(async () => {
+      await frm.set_value("accrual_journal_entry", journal_entry);
+      if (typeof render_submitted_view === "function" && bs_should_show_report_view(frm.doc)) {
+        window._bs._completed_view_batch = null;
+        render_submitted_view(frm);
+      } else if (typeof bs_render_table === "function") {
+        bs_render_table();
+      }
+      frappe.show_alert({ message: `Accrual Journal Entry ${journal_entry} ready.`, indicator: "green" }, 5);
+    });
   } catch (error) {
-    frappe.msgprint({ title: "Accrual Error", message: error.message || String(error), indicator: "red" });
+    pw.fail(error.message || String(error), "Close");
   }
 };
 
@@ -3455,7 +3530,7 @@ async function render_submitted_view_content(frm, $body) {
   });
 
   const component_header = component_cols
-    .map((col) => `<th class="bs-th bs-th-num" title="${frappe.utils.escape_html(col.label)}">${frappe.utils.escape_html(col.label)}</th>`)
+    .map((col) => `<th class="bs-th bs-th-num bs-th-comp" title="${frappe.utils.escape_html(col.label)}">${frappe.utils.escape_html(col.label)}</th>`)
     .join("");
 
   const trs = rows.map((r) => {
@@ -3466,12 +3541,12 @@ async function render_submitted_view_content(frm, $body) {
       .map((col) => {
         const val = bs_get_merged_component_value(comps, col.key);
         const cls = col.type === "deduction" ? "color:var(--bs-red)" : "";
-        return `<td class="bs-td bs-td-num" style="${cls}">${val ? fmt_num(val) : "—"}</td>`;
+        return `<td class="bs-td bs-td-num bs-td-comp" style="${cls}">${val ? fmt_num(val) : "—"}</td>`;
       })
       .join("");
     return `
     <tr class="bs-row">
-      <td class="bs-td bs-td-sticky bs-col-emp">${bs_build_emp_cell_html(r, { compact: true })}</td>
+      <td class="bs-td bs-td-sticky bs-report-col-emp">${bs_build_emp_cell_html(r, { compact: true, report: true })}</td>
       <td class="bs-td bs-col-dept"><div class="bs-dept-cell" title="${frappe.utils.escape_html(r.department || "")}">${frappe.utils.escape_html(r.department || "—")}</div></td>
       <td class="bs-td bs-td-num">${fmt_total(r.ctc || 0)}</td>
       <td class="bs-td bs-td-num">${fmt_total(salary_pay)}</td>
@@ -3489,7 +3564,7 @@ async function render_submitted_view_content(frm, $body) {
   const total_component_cells = component_cols
     .map((col) => {
       const val = parseFloat(merged_component_totals[col.key] || 0);
-      return `<td class="bs-td bs-td-num" style="font-weight:700">${val ? fmt_num(val) : "—"}</td>`;
+      return `<td class="bs-td bs-td-num bs-td-comp" style="font-weight:700">${val ? fmt_num(val) : "—"}</td>`;
     })
     .join("");
 
@@ -3499,7 +3574,7 @@ async function render_submitted_view_content(frm, $body) {
   }, 0);
   const totals_row = `
     <tr class="bs-row bs-total-row">
-      <td class="bs-td bs-td-sticky">TOTAL (${rows.length})</td>
+      <td class="bs-td bs-td-sticky bs-report-col-emp">TOTAL (${rows.length})</td>
       <td class="bs-td"></td>
       <td class="bs-td bs-td-num">${fmt_total(totals.ctc || 0)}</td>
       <td class="bs-td bs-td-num">${fmt_total(total_salary)}</td>
@@ -3563,21 +3638,21 @@ async function render_submitted_view_content(frm, $body) {
         ${!frm.doc.accrual_journal_entry ? `<button type="button" class="bs-btn-secondary" onclick="bs_create_accrual_journal_entry()">Create Accrual JE</button>` : ""}
         <button type="button" class="bs-btn-secondary" onclick="bs_export_batch_csv(window._bs.frm?.doc?.employees || [], '${(frm.doc.name || "batch").replace(/'/g, "\\'")}.csv')">Export CSV</button>
       </div>
-      <div class="bs-table-scroll">
-        <table class="bs-table">
+      <div class="bs-table-scroll bs-report-table-scroll">
+        <table class="bs-table bs-table-report">
           <thead><tr>
-            <th class="bs-th bs-th-sticky">Employee</th>
-            <th class="bs-th">Department</th>
-            <th class="bs-th bs-th-num">CTC</th>
-            <th class="bs-th bs-th-num">Salary</th>
-            <th class="bs-th bs-th-num">Overtime</th>
+            <th class="bs-th bs-th-sticky bs-report-col-emp">Employee</th>
+            <th class="bs-th bs-report-col-dept">Department</th>
+            <th class="bs-th bs-th-num bs-report-col-fixed">CTC</th>
+            <th class="bs-th bs-th-num bs-report-col-fixed">Salary</th>
+            <th class="bs-th bs-th-num bs-report-col-fixed">Overtime</th>
             ${component_header}
-            <th class="bs-th bs-th-num">Gross</th>
-            <th class="bs-th bs-th-num">Adv.Deduct</th>
-            <th class="bs-th bs-th-num">Net Pay</th>
-            <th class="bs-th">Slip</th>
-            <th class="bs-th">Payment</th>
-            <th class="bs-th">Status</th>
+            <th class="bs-th bs-th-num bs-report-col-fixed">Gross</th>
+            <th class="bs-th bs-th-num bs-report-col-fixed">Adv.Deduct</th>
+            <th class="bs-th bs-th-num bs-report-col-fixed">Net Pay</th>
+            <th class="bs-th bs-report-col-action">Slip</th>
+            <th class="bs-th bs-report-col-action">Payment</th>
+            <th class="bs-th bs-report-col-action">Status</th>
           </tr></thead>
           <tbody>${trs}${totals_row}</tbody>
         </table>

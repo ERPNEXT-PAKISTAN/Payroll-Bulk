@@ -262,11 +262,10 @@ function open_payroll_dialog(config = {}) {
 
   const frm     = window._bs.frm;
   const company = $("#bs-company-wrap input").val() || frm.doc.company || frappe.defaults.get_default("company");
-  const current_frequency = $("#bs-head-frequency").val() || frm.doc.payroll_frequency || "Monthly";
-  const current_start_date = $("#bs-head-start-date").val() || frm.doc.start_date || null;
-  const current_end_date = $("#bs-head-end-date").val() || frm.doc.end_date || null;
-  const current_posting_date = $("#bs-head-posting-date").val() || frm.doc.posting_date || frappe.datetime.get_today();
-  const settings = window._bs.settings || bs_default_settings();
+  const batch_start = frm.doc.start_date || "";
+  const batch_end = frm.doc.end_date || "";
+  const batch_posting = frm.doc.posting_date || batch_end || batch_start || "";
+  const batch_frequency = frm.doc.payroll_frequency || "Monthly";
 
   const d = new frappe.ui.Dialog({
     title: "Create Draft Salary Slips",
@@ -276,19 +275,12 @@ function open_payroll_dialog(config = {}) {
         options:`<div class="bs-notice bs-notice-info" style="margin-bottom:12px">
           Creating slips for <b>${window._bs.rows.length}</b> employee(s).<br>
           Total estimated net: <b>${fmt_num(window._bs.rows.reduce((s,r)=>s+r.net,0))}</b><br>
-          Period: <b>${current_start_date || "—"}</b> → <b>${current_end_date || "—"}</b>
-          ${current_posting_date ? ` · Posting <b>${current_posting_date}</b>` : ""}
+          Period (from saved batch): <b>${batch_start || "—"}</b> → <b>${batch_end || "—"}</b>
+          ${batch_posting ? ` · Posting <b>${batch_posting}</b>` : ""}<br>
+          <span style="font-size:11px;color:#64748b">Dates are not changed during slip creation. Edit the batch header first if the period is wrong.</span>
         </div>` },
       { fieldtype:"Link", fieldname:"company", options:"Company",
         label:"Company", reqd:1, default:company },
-      { fieldtype:"Select", fieldname:"payroll_frequency",
-        label:"Payroll Frequency",
-        options:["Monthly", "Bimonthly", "Fortnightly", "Weekly", "Daily"].join("\n"),
-        reqd:1, default:current_frequency },
-      { fieldtype:"Date", fieldname:"start_date", label:"Start Date", reqd:1, default: current_start_date },
-      { fieldtype:"Date", fieldname:"end_date",   label:"End Date",   reqd:1, default: current_end_date },
-      { fieldtype:"Date", fieldname:"posting_date", label:"Posting Date",
-        reqd:1, default: current_posting_date },
       { fieldtype:"Check", fieldname:"replace_existing_slips",
         label:"Cancel and Recreate Existing Slips",
         description:"Tick this when draft slips already exist or amounts were wrong.",
@@ -298,75 +290,27 @@ function open_payroll_dialog(config = {}) {
     ],
     primary_action_label: config.create_missing_only ? "Create Missing Draft Slips" : "Create Draft Slips",
     primary_action(vals) {
-      if (!vals.start_date || !vals.end_date) {
-        frappe.show_alert({ message:"Dates are required.", indicator:"red" }, 4); return;
+      if (!batch_start || !batch_end) {
+        frappe.show_alert({ message:"Save the batch with start and end dates first.", indicator:"red" }, 4); return;
       }
-      if (vals.start_date > vals.end_date) {
-        frappe.show_alert({ message:"Start date cannot be after end date.", indicator:"red" }, 4); return;
+      if (batch_start > batch_end) {
+        frappe.show_alert({ message:"Batch start date cannot be after end date.", indicator:"red" }, 4); return;
       }
       vals.advance_deduction_component = "Advance Deduction";
       vals.submit_slips = 0;
+      vals.payroll_frequency = batch_frequency;
+      vals.start_date = batch_start;
+      vals.end_date = batch_end;
+      vals.posting_date = batch_posting;
       d.hide();
       process_bulk(frm, vals);
     },
   });
 
-  const set_dialog_period = () => {
-    const freq = d.get_value("payroll_frequency");
-    const posting_date = d.get_value("posting_date") || frappe.datetime.get_today();
-    const base_date = frappe.datetime.str_to_obj(posting_date);
-
-    if (!freq || !base_date) return;
-
-    let start_date = posting_date;
-    let end_date = posting_date;
-
-    if (freq === "Monthly") {
-      start_date = frappe.datetime.month_start(posting_date);
-      end_date = frappe.datetime.month_end(posting_date);
-    } else if (freq === "Weekly") {
-      const day = base_date.getDay();
-      const monday = new Date(base_date);
-      monday.setDate(base_date.getDate() - ((day + 6) % 7));
-      const sunday = new Date(monday);
-      sunday.setDate(monday.getDate() + 6);
-      start_date = frappe.datetime.obj_to_str(monday);
-      end_date = frappe.datetime.obj_to_str(sunday);
-    } else if (freq === "Fortnightly") {
-      start_date = frappe.datetime.month_start(posting_date);
-      end_date = frappe.datetime.obj_to_str(new Date(base_date.getFullYear(), base_date.getMonth(), 15));
-    } else if (freq === "Bimonthly") {
-      const is_first_half = base_date.getDate() <= 15;
-      start_date = is_first_half
-        ? frappe.datetime.month_start(posting_date)
-        : frappe.datetime.obj_to_str(new Date(base_date.getFullYear(), base_date.getMonth(), 16));
-      end_date = is_first_half
-        ? frappe.datetime.obj_to_str(new Date(base_date.getFullYear(), base_date.getMonth(), 15))
-        : frappe.datetime.month_end(posting_date);
-    }
-
-    d.set_value("start_date", start_date);
-    d.set_value("end_date", end_date);
-  };
-
   d.show();
   setTimeout(() => {
     try {
-      d.fields_dict.payroll_frequency?.$input?.on("change", set_dialog_period);
-      d.fields_dict.posting_date?.$input?.on("change", () => {
-        if (!d.get_value("start_date") || !d.get_value("end_date")) {
-          set_dialog_period();
-          return;
-        }
-        const freq = d.get_value("payroll_frequency");
-        if (["Monthly", "Bimonthly", "Fortnightly", "Weekly", "Daily"].includes(freq)) {
-          set_dialog_period();
-        }
-      });
-      if (!(current_start_date && current_end_date)) {
-        set_dialog_period();
-      }
-      d.$wrapper.find(".modal-body").css({ "min-height": "220px", overflow: "visible" });
+      d.$wrapper.find(".modal-body").css({ "min-height": "180px", overflow: "visible" });
     } catch (error) {
       console.warn("Payroll dialog setup failed:", error);
     }
@@ -630,12 +574,35 @@ async function bs_existing_salary_slip(row, vals) {
   return (res.message || [])[0]?.name || "";
 }
 
-async function process_bulk_in_background(frm, vals, rows, log, set_prog) {
+function bs_finish_slip_process(pw, results, frm) {
+  const success = results.filter((r) => r.status !== "Failed" && !!r.slip_name);
+  const failed = results.filter((r) => r.status === "Failed");
+  const indicator = failed.length ? (success.length ? "warn" : "error") : "success";
+  const failed_html = failed.length
+    ? `<br><span style="font-size:12px">${failed.map((r) => `<b>${r.employee}</b>: ${frappe.utils.escape_html(r.error || "Failed")}`).join("<br>")}</span>`
+    : "";
+  pw.set_title(failed.length ? (success.length ? "Completed with errors" : "Processing failed") : "Salary slips created");
+  pw.set_subtitle(`${success.length} succeeded${failed.length ? ` · ${failed.length} failed` : ""}`);
+  pw.log(failed.length ? "Processing finished with errors." : "All salary slips processed successfully ✓", failed.length ? "error" : "success");
+  pw.complete({
+    indicator,
+    html: `<div class="bs-notice bs-notice-${indicator === "success" ? "info" : indicator === "warn" ? "warn" : "error"}">
+      <b style="color:var(--bs-green)">${success.length} succeeded</b>
+      ${failed.length ? `&nbsp;·&nbsp;<b style="color:var(--bs-red)">${failed.length} failed</b>${failed_html}` : ""}
+    </div>`,
+    button_label: "View Batch Report",
+  });
+  pw.on_done(() => bs_show_batch_report_view(frm));
+}
+
+async function process_bulk_in_background(frm, vals, rows, pw, batch_snapshot, fail_and_restore) {
+  const log = pw.log;
+  const set_prog = pw.set_prog;
   const threshold = window.BS_BACKGROUND_ROW_THRESHOLD || 20;
   log(`Large batch (${rows.length} ≥ ${threshold}) — queued for server processing…`, "info");
   const row_names = rows.map((row) => row.row_name).filter(Boolean);
   if (!row_names.length) {
-    log("Employee rows are not saved yet. Save failed or rows are missing row IDs.", "error");
+    await fail_and_restore("Employee rows are not saved yet. Save failed or rows are missing row IDs.");
     return;
   }
 
@@ -655,7 +622,7 @@ async function process_bulk_in_background(frm, vals, rows, log, set_prog) {
   });
   const job_id = (enqueue.message || enqueue || {}).job_id;
   if (!job_id) {
-    log("Failed to enqueue background job.", "error");
+    await fail_and_restore("Failed to enqueue background job.");
     return;
   }
 
@@ -671,12 +638,7 @@ async function process_bulk_in_background(frm, vals, rows, log, set_prog) {
     if (["finished", "failed", "not found"].includes(job.status)) {
       finished = true;
       if (job.status === "failed") {
-        log(`Background job failed: ${job.error || "Unknown error"}`, "error");
-        frappe.msgprint({
-          title: "Background Job Failed",
-          message: job.error || "Unknown error",
-          indicator: "red",
-        });
+        await fail_and_restore(job.error || "Background job failed.");
         return;
       }
     }
@@ -698,107 +660,84 @@ async function process_bulk_in_background(frm, vals, rows, log, set_prog) {
     payment_entry: row.payment_entry || "",
   }));
   set_prog(rows.length);
-  log("Background processing complete ✓", "success");
   window._bs.results = results;
-  await bs_show_batch_report_view(frm);
+  window._bs._lock_batch_period = false;
+  bs_finish_slip_process(pw, results, frm);
 }
 
 // ─── 11. PROCESS ──────────────────────────────────────────────────────────────
 async function process_bulk(frm, vals) {
   window._bs.vals = vals;
+  const batch_snapshot = typeof bs_snapshot_batch_state === "function" ? bs_snapshot_batch_state(frm) : null;
+  window._bs._lock_batch_period = true;
+
+  const period = {
+    start_date: frm.doc.start_date || vals.start_date,
+    end_date: frm.doc.end_date || vals.end_date,
+    posting_date: frm.doc.posting_date || vals.posting_date || frm.doc.end_date,
+    payroll_frequency: frm.doc.payroll_frequency || vals.payroll_frequency || "Monthly",
+  };
+  vals.start_date = period.start_date;
+  vals.end_date = period.end_date;
+  vals.posting_date = period.posting_date;
+  vals.payroll_frequency = period.payroll_frequency;
+
   const $body = frm.layout.wrapper.find(".form-page");
   const rows  = [...window._bs.rows];
   const total = rows.length;
 
-  $body.find("#bs-main-wrap").html(`
-    <div class="bs-wrap">
-      <div class="bs-header-card">
-        <div class="bs-header-icon">●</div>
-        <div>
-          <div class="bs-header-title">Creating Salary Slips</div>
-          <div class="bs-header-sub">Processing ${total} employee(s)…</div>
-        </div>
-      </div>
-      <div class="bs-progress-wrap">
-        <div class="bs-progress-bar-bg">
-          <div class="bs-progress-bar" id="bs-prog-bar" style="width:0%"></div>
-        </div>
-        <div id="bs-prog-label" class="bs-prog-label">0 / ${total}</div>
-      </div>
-      <div id="bs-log" class="bs-log"></div>
-    </div>
-  `);
-
-  const log = (msg, type="info") => {
-    const el = document.getElementById("bs-log");
-    if (!el) return;
-    const d = document.createElement("div");
-    d.className = `bs-log-row bs-log-${type}`;
-    d.innerHTML = msg;
-    el.appendChild(d);
-    el.scrollTop = el.scrollHeight;
-  };
-  const set_prog = (n) => {
-    const b = document.getElementById("bs-prog-bar");
-    const l = document.getElementById("bs-prog-label");
-    if (b) b.style.width = Math.round((n / Math.max(total, 1)) * 100) + "%";
-    if (l) l.textContent = `${n} / ${total}`;
-  };
+  const pw = bs_create_process_window({
+    title: "Creating Salary Slips",
+    subtitle: `Processing ${total} employee(s)…`,
+    total,
+    modal: false,
+    target: $body.find("#bs-main-wrap"),
+    done_label: "View Batch Report",
+  });
+  const log = pw.log;
+  const set_prog = pw.set_prog;
 
   log("Saving parent document…");
-  frm.doc.company           = vals.company;
-  frm.doc.payroll_frequency = vals.payroll_frequency;
-  frm.doc.start_date        = vals.start_date;
-  frm.doc.end_date          = vals.end_date;
-  frm.doc.posting_date      = vals.posting_date;
+  frm.doc.company = vals.company || frm.doc.company;
   bs_sync_to_frm(frm);
+
+  const fail_and_restore = async (message) => {
+    window._bs._lock_batch_period = false;
+    pw.fail(message, "Back to Batch");
+    pw.on_done(async () => {
+      if (batch_snapshot && typeof bs_restore_batch_snapshot === "function") {
+        await bs_restore_batch_snapshot(frm, batch_snapshot);
+      } else if (typeof bs_bootstrap_main_ui === "function") {
+        await bs_bootstrap_main_ui(frm);
+      }
+    });
+  };
 
   try {
     await new Promise((res, rej) => frm.save("Save", (r) => r.exc ? rej(new Error(r.exc)) : res(r)));
     bs_sync_row_names_from_doc(frm);
     log("Parent doc saved ✓", "success");
   } catch (e) {
-    log(`Parent save failed: ${e.message || e}`, "error");
-    frappe.msgprint({ title: "Save Error", message: e.message || String(e), indicator: "red" });
+    await fail_and_restore(e.message || String(e));
     return;
   }
 
-  log("Loading attendance / source data…");
+  log("Verifying attendance / source data…");
   try {
-    const source_res = await bs_call("payroll_bulk.api.ensure_bulk_batch_source_data", {
+    await bs_call("payroll_bulk.api.ensure_bulk_batch_source_data", {
       batch_name: frm.doc.name,
-      start_date: vals.start_date,
-      end_date: vals.end_date,
+      start_date: period.start_date,
+      end_date: period.end_date,
     });
-    const source_rows = source_res.message?.rows || source_res.rows || [];
-    await frm.reload_doc();
-    bs_sync_row_names_from_doc(frm);
-    if (typeof bs_merge_saved_rows_from_frm === "function") {
-      bs_merge_saved_rows_from_frm(frm);
-    }
-    if (typeof bs_apply_source_metrics_from_doc === "function") {
-      bs_apply_source_metrics_from_doc(frm);
-    }
-    (window._bs.rows || []).forEach((row) => {
-      const item = source_rows.find((r) => r.employee === row.employee) || {};
-      if (item.payment_days != null) row.payment_days = parseFloat(item.payment_days || 0);
-      if (item.attendance_days != null) row.attendance_days = parseFloat(item.attendance_days || 0);
-      if (item.absent_days != null) row.absent_days = parseFloat(item.absent_days || 0);
-      if (item.ot_amount != null) row.ot_amount = parseFloat(item.ot_amount || 0);
-      recalc_row(row);
-    });
-    bs_sync_to_frm(frm);
-    await new Promise((res, rej) => frm.save("Save", (r) => (r.exc ? rej(new Error(r.exc)) : res(r))));
-    log("Source data loaded ✓", "success");
+    log("Source data verified ✓", "success");
   } catch (e) {
-    log(`Source load failed: ${e.message || e}`, "error");
-    frappe.msgprint({ title: "Source Data Required", message: e.message || String(e), indicator: "red" });
+    await fail_and_restore(e.message || String(e));
     return;
   }
 
   const threshold = window.BS_BACKGROUND_ROW_THRESHOLD || 20;
   if (rows.length >= threshold) {
-    await process_bulk_in_background(frm, vals, rows, log, set_prog);
+    await process_bulk_in_background(frm, vals, rows, pw, batch_snapshot, fail_and_restore);
     return;
   }
 
@@ -989,11 +928,11 @@ async function process_bulk(frm, vals) {
     log(has_failures ? "Parent kept in Draft because some rows failed." : "Parent remains Draft. Salary Slips are submitted separately.", has_failures ? "info" : "success");
   } catch (e) {
     log(`Parent finalize failed: ${e.message || e}`, "error");
-    frappe.msgprint({ title:"Finalize Error", message:e.message || String(e), indicator:"red" });
   }
 
   window._bs.results = results;
-  await bs_show_batch_report_view(frm);
+  window._bs._lock_batch_period = false;
+  bs_finish_slip_process(pw, results, frm);
 }
 
 // ─── 12. SUMMARY ──────────────────────────────────────────────────────────────
