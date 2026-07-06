@@ -338,10 +338,7 @@ async function bs_repair_period_from_doc(frm) {
 async function bs_get_settings() {
   const defaults = bs_default_settings();
   try {
-    const res = await bs_call("frappe.client.get", {
-      doctype: "Payroll Bulk Settings",
-      name: "Payroll Bulk Settings",
-    });
+    const res = await bs_call("payroll_bulk.api.get_payroll_bulk_settings");
     return Object.assign({}, defaults, res.message || {});
   } catch (error) {
     console.warn("Payroll Bulk Settings load failed, using defaults.", error);

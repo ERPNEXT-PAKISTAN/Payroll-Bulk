@@ -14,9 +14,24 @@ Bulk payroll batch management for [ERPNext HRMS](https://github.com/frappe/hrms)
 ```bash
 bench get-app https://github.com/ERPNEXT-PAKISTAN/Payroll-Bulk
 bench --site your-site install-app payroll_bulk
+bench --site your-site migrate
 bench build --app payroll_bulk
 sudo supervisorctl restart all   # reload Python workers after code updates
 ```
+
+## Update Existing Installed Server
+
+Use these commands after pulling new commits on a server where `payroll_bulk` is already installed:
+
+```bash
+cd /home/frappe/frappe-bench
+bench --site your-site migrate
+bench build --app payroll_bulk
+bench restart
+bench --site your-site clear-cache
+```
+
+For production, replace `bench restart` with your process manager restart (for example `sudo supervisorctl restart all`).
 
 ## Main DocTypes
 
@@ -96,6 +111,7 @@ Key methods in `payroll_bulk.api`:
 | `get_batch_completed_summary` | Totals, components, JV refs for completed view |
 | `get_bulk_attendance_values` | Fetch attendance/check-in days |
 | `sync_payroll_bulk_component_rules` | Sync component rules from salary structures |
+| `get_payroll_bulk_settings` | Safe settings fetch with multi-company permission fallback |
 
 ## Utility scripts
 

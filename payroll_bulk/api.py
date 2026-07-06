@@ -434,6 +434,94 @@ def _merge_component_rules(existing_rules: list[dict] | None, inferred_rules: li
 	return merged
 
 
+def _get_accessible_companies() -> list[str]:
+	return frappe.get_list("Company", pluck="name", limit_page_length=0)
+
+
+def _resolve_company_for_user(preferred_company: str | None = None) -> str:
+	accessible = _get_accessible_companies()
+	accessible_set = set(accessible)
+	if preferred_company and (not accessible or preferred_company in accessible_set):
+		return preferred_company
+
+	for candidate in (
+		frappe.defaults.get_user_default("Company"),
+		frappe.defaults.get_global_default("company"),
+	):
+		if candidate and (not accessible or candidate in accessible_set):
+			return candidate
+
+	return accessible[0] if accessible else (preferred_company or "")
+
+
+def _read_payroll_bulk_settings_with_fallback() -> dict:
+	fields = [
+		"company",
+		"default_calculation_mode",
+		"default_manual_salary_basis",
+		"default_overtime_source",
+		"default_per_piece_basis",
+		"auto_load_structure_components",
+		"overtime_doctype",
+		"overtime_employee_field",
+		"overtime_date_field",
+		"overtime_hours_field",
+		"overtime_qty_field",
+		"overtime_rate_field",
+		"hours_component",
+		"qty_component",
+		"default_use_hours",
+		"default_use_qty",
+		"default_overtime_with_salary",
+		"default_payroll_frequency",
+		"show_department_filter",
+		"show_branch_filter",
+		"show_designation_filter",
+		"show_employee_filter",
+		"auto_hide_filters",
+		"enable_filter_fetch",
+		"enable_manual_add",
+		"enable_component_configuration",
+		"default_submit_slips",
+	]
+
+	values = {fieldname: frappe.db.get_single_value("Payroll Bulk Settings", fieldname) for fieldname in fields}
+	values["component_rules"] = frappe.get_all(
+		"Payroll Bulk Component Setting",
+		filters={
+			"parenttype": "Payroll Bulk Settings",
+			"parentfield": "component_rules",
+			"parent": "Payroll Bulk Settings",
+		},
+		fields=["salary_component", "component_type", "enabled"],
+		order_by="idx asc",
+		limit_page_length=0,
+	)
+	values["company"] = _resolve_company_for_user(values.get("company"))
+	return values
+
+
+def _get_payroll_bulk_settings_doc() -> frappe.model.document.Document | None:
+	if not frappe.db.exists("Payroll Bulk Settings", "Payroll Bulk Settings"):
+		return None
+	try:
+		return frappe.get_cached_doc("Payroll Bulk Settings", "Payroll Bulk Settings")
+	except frappe.PermissionError:
+		return None
+
+
+@frappe.whitelist()
+def get_payroll_bulk_settings():
+	try:
+		settings = frappe.get_single("Payroll Bulk Settings")
+		data = settings.as_dict()
+		data["component_rules"] = [row.as_dict() for row in settings.get("component_rules") or []]
+		data["company"] = _resolve_company_for_user(data.get("company"))
+		return data
+	except frappe.PermissionError:
+		return _read_payroll_bulk_settings_with_fallback()
+
+
 @frappe.whitelist()
 def sync_payroll_bulk_component_rules(company: str | None = None):
 	settings = frappe.get_single("Payroll Bulk Settings")
@@ -1873,8 +1961,8 @@ def _resolve_overtime_component(structure_doc) -> str:
 	component = _guess_component(structure_doc, "earnings", ("overtime", "ot", "hour", "hourly"))
 	if component:
 		return component
-	if frappe.db.exists("DocType", "Payroll Bulk Settings"):
-		settings = frappe.get_single("Payroll Bulk Settings")
+	settings = _get_payroll_bulk_settings_doc()
+	if settings:
 		for rule in settings.get("component_rules") or []:
 			if not cint(rule.enabled, 1):
 				continue
@@ -2692,7 +2780,7 @@ def _sync_piece_additional_salaries(
 	qty_amount = flt(row.get("source_qty")) * flt(row.get("piece_rate")) if cint(row.get("use_qty")) else 0
 	overtime_component = _guess_component(structure_doc, "earnings", ("overtime", "ot", "hour", "hourly"))
 	qty_component = _guess_qty_component(structure_doc)
-	settings = frappe.get_cached_doc("Payroll Bulk Settings") if frappe.db.exists("Payroll Bulk Settings", "Payroll Bulk Settings") else None
+	settings = _get_payroll_bulk_settings_doc()
 	if settings and settings.get("qty_component"):
 		qty_component = settings.qty_component
 	if settings and settings.get("hours_component"):
