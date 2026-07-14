@@ -498,6 +498,14 @@ function bs_focus_pending_editable() {
   }
 }
 
+function bs_update_sticky_offsets() {
+  const wrap = document.getElementById("bs-main-wrap");
+  const header = document.getElementById("bs-inputs-header");
+  if (!wrap || !header) return;
+  const height = Math.ceil(header.getBoundingClientRect().height || 0);
+  wrap.style.setProperty("--bs-inputs-header-height", `${height + 14}px`);
+}
+
 function bs_bind_editable_keyboard_nav() {
   const container = document.getElementById("bs-table-container");
   if (!container || container.dataset.bsKeyboardNavBound === "1") return;
@@ -1484,6 +1492,7 @@ async function render_main_ui(frm) {
       </div>` : ``}
 
       <!-- Employee table -->
+      <div id="bs-inputs-header" class="bs-inputs-header">
       <div class="bs-section-label" style="display:flex;justify-content:space-between;align-items:center">
         <span>Employee Salary Inputs</span>
         <div style="display:flex;gap:8px;align-items:center">
@@ -1505,6 +1514,7 @@ async function render_main_ui(frm) {
           <button class="bs-filter-btn" data-filter="cancelled">Cancelled</button>
           <button class="bs-filter-btn" data-filter="paid">Paid</button>
         </div>
+      </div>
       </div>
       <div class="bs-table-wrap" id="bs-table-container">
         <div class="bs-empty">No employees added yet.</div>
@@ -1568,6 +1578,11 @@ async function render_main_ui(frm) {
   $body.prepend($wrap);
   if (typeof bs_tidy_form_after_ui === "function") bs_tidy_form_after_ui(frm);
   bs_bind_editable_keyboard_nav();
+  bs_update_sticky_offsets();
+  if (!window._bs._sticky_offset_bound) {
+    window.addEventListener("resize", bs_update_sticky_offsets);
+    window._bs._sticky_offset_bound = true;
+  }
 
   // ── Link controls ────────────────────────────────────────────────────────
   const make_link = (parent_id, fieldname, options, placeholder) => {
@@ -2682,7 +2697,7 @@ function bs_render_table() {
     </div>`;
 
   container.innerHTML = `
-    <div class="bs-table-scroll">
+    <div class="bs-table-scroll bs-main-table-scroll">
       ${toolbar}
       <table class="bs-table">
         <colgroup>
@@ -2705,6 +2720,7 @@ function bs_render_table() {
         <tbody>${trs}${totals_row}</tbody>
       </table>
     </div>`;
+  bs_update_sticky_offsets();
   bs_focus_pending_editable();
 }
 

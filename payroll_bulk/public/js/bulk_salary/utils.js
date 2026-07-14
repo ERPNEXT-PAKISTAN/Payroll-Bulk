@@ -500,6 +500,8 @@ function inject_bs_styles() {
     .bs-link-chip{display:inline-flex;align-items:center;border:1px solid var(--bs-border);background:#fff;border-radius:999px;padding:1px 7px;font-size:10px;color:var(--bs-muted);cursor:pointer}
     .bs-link-chip-warn{border-color:#fcd34d;background:var(--bs-amber-dim);color:var(--bs-amber)}
     .bs-table-scroll{max-height:72vh;overflow:auto;border:1px solid var(--bs-border);border-radius:var(--bs-radius);background:var(--bs-surface);box-shadow:var(--bs-shadow);position:relative;isolation:isolate}
+    .bs-inputs-header{position:sticky;top:8px;z-index:14;background:var(--bs-page);padding:6px 0 8px}
+    .bs-main-table-scroll{max-height:none;overflow:visible}
     .bs-table-scroll > .bs-table-toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin:0;padding:8px 10px;background:var(--bs-surface);border-bottom:1px solid var(--bs-border);flex-shrink:0}
     .bs-table-wrap{border:none;border-radius:0;overflow:visible;margin-bottom:4px;background:transparent;box-shadow:none}
     .bs-table{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;table-layout:fixed;margin-left:2px}
@@ -521,6 +523,7 @@ function inject_bs_styles() {
     .bs-th.bs-col-gross,.bs-td.bs-col-gross{padding-left:12px;padding-right:12px}
     .bs-th{background:linear-gradient(180deg,#f8fbff 0%,#eef4ff 100%);padding:10px 12px;text-align:left;font-size:11px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:#475569;border-bottom:1px solid var(--bs-border)}
     .bs-table-scroll thead .bs-th{position:sticky;top:0;z-index:3}
+    .bs-table-scroll.bs-main-table-scroll thead .bs-th{position:sticky;top:var(--bs-inputs-header-height,120px);z-index:4}
     .bs-th.bs-th-num,.bs-td-num{text-align:right}
     .bs-th.bs-th-sticky,.bs-td-sticky{position:sticky;left:0;z-index:2;background:#fff;box-shadow:1px 0 0 #e9eef5}
     .bs-th.bs-th-sticky{z-index:5;background:linear-gradient(180deg,#f8fbff 0%,#eef4ff 100%)}
