@@ -498,6 +498,23 @@ function bs_focus_pending_editable() {
   }
 }
 
+function bs_bind_editable_keyboard_nav() {
+  const container = document.getElementById("bs-table-container");
+  if (!container || container.dataset.bsKeyboardNavBound === "1") return;
+
+  container.addEventListener("keydown", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const is_edit_target = target.matches(
+      "input:not([type='hidden']):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+    );
+    if (!is_edit_target) return;
+    window.bs_handle_edit_keydown(event, target);
+  });
+
+  container.dataset.bsKeyboardNavBound = "1";
+}
+
 async function bs_apply_period_controls(frm, trigger = "dates") {
   const period = bs_normalize_period(bs_read_period_from_header(frm), trigger);
   await bs_set_doc_values(frm, period);
@@ -1550,6 +1567,7 @@ async function render_main_ui(frm) {
 
   $body.prepend($wrap);
   if (typeof bs_tidy_form_after_ui === "function") bs_tidy_form_after_ui(frm);
+  bs_bind_editable_keyboard_nav();
 
   // ── Link controls ────────────────────────────────────────────────────────
   const make_link = (parent_id, fieldname, options, placeholder) => {
@@ -3071,11 +3089,26 @@ window.bs_manage_salary_slip = async (id, action) => {
 };
 
 window.bs_handle_edit_keydown = (event, element) => {
-  if (event.key !== "Enter") return;
-  event.preventDefault();
-  const items = [...document.querySelectorAll("#bs-table-container .bs-editable")];
+  if (!["Enter", "Tab"].includes(event.key)) return;
+  const items = [...document.querySelectorAll(
+    "#bs-table-container input:not([type='hidden']):not([disabled]), " +
+    "#bs-table-container select:not([disabled]), " +
+    "#bs-table-container textarea:not([disabled]), " +
+    "#bs-table-container [tabindex]:not([tabindex='-1'])"
+  )].filter((el) => {
+    if (!(el instanceof HTMLElement)) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    if (el.hasAttribute("readonly")) return false;
+    return true;
+  });
   const index = items.indexOf(element);
-  window._bs.next_focus_index = index >= 0 ? index + 1 : null;
+  if (index < 0) return;
+
+  const step = event.shiftKey ? -1 : 1;
+  const next_index = index + step;
+  window._bs.next_focus_index = next_index >= 0 && next_index < items.length ? next_index : null;
+  event.preventDefault();
   if (typeof element.blur === "function") element.blur();
 };
 
