@@ -369,7 +369,8 @@ function inject_bs_styles() {
     .bs-inline-filter-fields .bs-filter-field:focus-within,.bs-inline-filter-fields .bs-filter-field-inline:focus-within{z-index:12}
     .bs-inline-filter-fields .form-group,.bs-filter-field-inline .form-group{margin:0;width:100%;position:relative}
     .bs-inline-filter-fields .form-control,.bs-filter-field-inline .bs-select-sm{width:100%;min-width:0}
-    .bs-inline-filter-fields .link-btn,.bs-inline-filter-fields .awesomplete{width:100%}
+    .bs-inline-filter-fields .awesomplete{width:100%}
+    .bs-inline-filter-fields .link-btn{width:auto}
     .bs-title-container .awesomplete>ul,.bs-filter-card .awesomplete>ul{z-index:1200!important;max-height:240px;overflow:auto}
     .bs-calculation-bar{display:grid;grid-template-columns:102px minmax(0,1fr);gap:6px;align-items:flex-end}
     .bs-filter-field-inline .form-group{margin:0}
